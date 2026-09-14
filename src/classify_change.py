@@ -19,7 +19,7 @@ from db import PROJECT_ROOT
 load_dotenv(PROJECT_ROOT / ".env")
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
-OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "anthropic/claude-sonnet-4.5")
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "nvidia/nemotron-3-ultra-550b-a55b:free")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 VALID_CHANGE_TYPES = {"New Provision", "Amendment", "Repeal", "Clarification", "Correction"}
