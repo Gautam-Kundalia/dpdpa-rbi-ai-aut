@@ -1,0 +1,584 @@
+{
+  "db/schema.sql": {
+    "mtime": 1788153258.9438846,
+    "seen": 1789434249.8863957,
+    "ast_hash": "1986b18f9c49ae374de6cd29bf0e0fbf",
+    "semantic_hash": "1986b18f9c49ae374de6cd29bf0e0fbf"
+  },
+  "src/apply_change.py": {
+    "mtime": 1789402007.126788,
+    "seen": 1789434249.8864152,
+    "ast_hash": "3ddf80b0931454618002ad3393fa4c1f",
+    "semantic_hash": "3ddf80b0931454618002ad3393fa4c1f"
+  },
+  "src/classify_change.py": {
+    "mtime": 1789404510.6521785,
+    "seen": 1789434249.8864243,
+    "ast_hash": "8f3889365f7228031e292b48ced997f2",
+    "semantic_hash": "8f3889365f7228031e292b48ced997f2"
+  },
+  "src/db.py": {
+    "mtime": 1788106384.8571415,
+    "seen": 1789434249.8864298,
+    "ast_hash": "eeefe28871b237d6d21c721a3ab97ce1",
+    "semantic_hash": "eeefe28871b237d6d21c721a3ab97ce1"
+  },
+  "src/export_excel.py": {
+    "mtime": 1788168507.460411,
+    "seen": 1789434249.8864353,
+    "ast_hash": "a8fb1636182caaba8de85e9ab492be4b",
+    "semantic_hash": "a8fb1636182caaba8de85e9ab492be4b"
+  },
+  "src/export_word.py": {
+    "mtime": 1788168451.0072377,
+    "seen": 1789434249.8864403,
+    "ast_hash": "a361140a1ae1501a7856e9a108ac48b0",
+    "semantic_hash": "a361140a1ae1501a7856e9a108ac48b0"
+  },
+  "src/fetch_sources.py": {
+    "mtime": 1789402170.054074,
+    "seen": 1789434249.8864458,
+    "ast_hash": "a00d7715e075534c3c2f345b6305c6ce",
+    "semantic_hash": "a00d7715e075534c3c2f345b6305c6ce"
+  },
+  "src/init_db.py": {
+    "mtime": 1788168512.845297,
+    "seen": 1789434249.886451,
+    "ast_hash": "0cfdde3c4b5c008aa864d638faf84d7e",
+    "semantic_hash": "0cfdde3c4b5c008aa864d638faf84d7e"
+  },
+  "src/notify.py": {
+    "mtime": 1789406384.3473635,
+    "seen": 1789434249.8864558,
+    "ast_hash": "c1404624e28427793fa3c37d9c3d8e35",
+    "semantic_hash": "c1404624e28427793fa3c37d9c3d8e35"
+  },
+  "src/run_pipeline.py": {
+    "mtime": 1789402025.976589,
+    "seen": 1789434249.8864608,
+    "ast_hash": "efdd30a8de241bf2d02e84fc3e6f0311",
+    "semantic_hash": "efdd30a8de241bf2d02e84fc3e6f0311"
+  },
+  "src/seed_dpdp_act_full.py": {
+    "mtime": 1788153721.3958623,
+    "seen": 1789434249.886466,
+    "ast_hash": "fc451b7c28b585133af13257ba561ccc",
+    "semantic_hash": "fc451b7c28b585133af13257ba561ccc"
+  },
+  "src/seed_dpdp_rules_full.py": {
+    "mtime": 1788153453.8684523,
+    "seen": 1789434249.886472,
+    "ast_hash": "7d9143f0e5ed89ae8cad466534ae998c",
+    "semantic_hash": "7d9143f0e5ed89ae8cad466534ae998c"
+  },
+  ".github/workflows/daily-check.yml": {
+    "mtime": 1789404507.3298533,
+    "seen": 1789434249.886477,
+    "ast_hash": "45c94c6ede7f7e57d70e172623c77e03",
+    "semantic_hash": "45c94c6ede7f7e57d70e172623c77e03"
+  },
+  "README.md": {
+    "mtime": 1789405307.85259,
+    "seen": 1789434249.886482,
+    "ast_hash": "545de9fc08f36129c960c3f787ff509c",
+    "semantic_hash": "545de9fc08f36129c960c3f787ff509c"
+  },
+  "docs/full_text/DPDPA-S1.md": {
+    "mtime": 1788150634.221358,
+    "seen": 1789434249.8864868,
+    "ast_hash": "69937e817396795249e63d9a0731a058",
+    "semantic_hash": "69937e817396795249e63d9a0731a058"
+  },
+  "docs/full_text/DPDPA-S10.md": {
+    "mtime": 1788150634.249721,
+    "seen": 1789434249.8864915,
+    "ast_hash": "eabe8ea6f443e1d997199e29ad292e14",
+    "semantic_hash": "eabe8ea6f443e1d997199e29ad292e14"
+  },
+  "docs/full_text/DPDPA-S11.md": {
+    "mtime": 1788150634.250732,
+    "seen": 1789434249.8864968,
+    "ast_hash": "6dddf936ab33cc72da09ed9fa61006fe",
+    "semantic_hash": "6dddf936ab33cc72da09ed9fa61006fe"
+  },
+  "docs/full_text/DPDPA-S12.md": {
+    "mtime": 1788150634.2522378,
+    "seen": 1789434249.8865016,
+    "ast_hash": "0a7f8ce84202169c9929b1328724844d",
+    "semantic_hash": "0a7f8ce84202169c9929b1328724844d"
+  },
+  "docs/full_text/DPDPA-S13.md": {
+    "mtime": 1788150634.2522378,
+    "seen": 1789434249.8865066,
+    "ast_hash": "41d6a7747b133caa3e746d5c5d7d8597",
+    "semantic_hash": "41d6a7747b133caa3e746d5c5d7d8597"
+  },
+  "docs/full_text/DPDPA-S14.md": {
+    "mtime": 1788150634.2522378,
+    "seen": 1789434249.8865113,
+    "ast_hash": "109015ac07740a860e72aef42a135a02",
+    "semantic_hash": "109015ac07740a860e72aef42a135a02"
+  },
+  "docs/full_text/DPDPA-S15.md": {
+    "mtime": 1788150634.2627542,
+    "seen": 1789434249.8865163,
+    "ast_hash": "b11b9fc3195c1f1c3befee080d45b889",
+    "semantic_hash": "b11b9fc3195c1f1c3befee080d45b889"
+  },
+  "docs/full_text/DPDPA-S16.md": {
+    "mtime": 1788150634.2627542,
+    "seen": 1789434249.8865209,
+    "ast_hash": "339ee0d44a1755878c7798ed766096eb",
+    "semantic_hash": "339ee0d44a1755878c7798ed766096eb"
+  },
+  "docs/full_text/DPDPA-S17.md": {
+    "mtime": 1788150634.2664115,
+    "seen": 1789434249.886527,
+    "ast_hash": "af1de1d15542186f6fbfa7e470e7791b",
+    "semantic_hash": "af1de1d15542186f6fbfa7e470e7791b"
+  },
+  "docs/full_text/DPDPA-S18.md": {
+    "mtime": 1788150634.2664115,
+    "seen": 1789434249.8865318,
+    "ast_hash": "8fd363dcca9adac567647055d4da8276",
+    "semantic_hash": "8fd363dcca9adac567647055d4da8276"
+  },
+  "docs/full_text/DPDPA-S19.md": {
+    "mtime": 1788150634.2707748,
+    "seen": 1789434249.8865366,
+    "ast_hash": "7fe4e75a2aa8d011f4f0a35fe5fc92b1",
+    "semantic_hash": "7fe4e75a2aa8d011f4f0a35fe5fc92b1"
+  },
+  "docs/full_text/DPDPA-S2.md": {
+    "mtime": 1788150634.221358,
+    "seen": 1789434249.8865418,
+    "ast_hash": "4c8879bb7d2d1983a650e0ebdcd5a6bb",
+    "semantic_hash": "4c8879bb7d2d1983a650e0ebdcd5a6bb"
+  },
+  "docs/full_text/DPDPA-S20.md": {
+    "mtime": 1788150634.2707748,
+    "seen": 1789434249.8865469,
+    "ast_hash": "8032c37684e21e529e50cd78a89bfa04",
+    "semantic_hash": "8032c37684e21e529e50cd78a89bfa04"
+  },
+  "docs/full_text/DPDPA-S21.md": {
+    "mtime": 1788150634.273291,
+    "seen": 1789434249.8865519,
+    "ast_hash": "c321a787ba7e0d95e3ce89f0ff53f3ec",
+    "semantic_hash": "c321a787ba7e0d95e3ce89f0ff53f3ec"
+  },
+  "docs/full_text/DPDPA-S22.md": {
+    "mtime": 1788150634.273291,
+    "seen": 1789434249.8865566,
+    "ast_hash": "f1b6148a014c78d5b9aad802193917ec",
+    "semantic_hash": "f1b6148a014c78d5b9aad802193917ec"
+  },
+  "docs/full_text/DPDPA-S23.md": {
+    "mtime": 1788150634.273291,
+    "seen": 1789434249.8865614,
+    "ast_hash": "6e871cfebae2835657717b872e8a8451",
+    "semantic_hash": "6e871cfebae2835657717b872e8a8451"
+  },
+  "docs/full_text/DPDPA-S24.md": {
+    "mtime": 1788150634.273291,
+    "seen": 1789434249.8865664,
+    "ast_hash": "4d375dc5deffb887730f2e5a0b7aba93",
+    "semantic_hash": "4d375dc5deffb887730f2e5a0b7aba93"
+  },
+  "docs/full_text/DPDPA-S25.md": {
+    "mtime": 1788150634.273291,
+    "seen": 1789434249.8865712,
+    "ast_hash": "de28136ef9bfe334744c447ae0ee15ef",
+    "semantic_hash": "de28136ef9bfe334744c447ae0ee15ef"
+  },
+  "docs/full_text/DPDPA-S26.md": {
+    "mtime": 1788150634.273291,
+    "seen": 1789434249.8865762,
+    "ast_hash": "f23dc4897eb5e2efbf3c95647f90d895",
+    "semantic_hash": "f23dc4897eb5e2efbf3c95647f90d895"
+  },
+  "docs/full_text/DPDPA-S27.1a_c_e_2_3.md": {
+    "mtime": 1788150634.2857423,
+    "seen": 1789434249.8865807,
+    "ast_hash": "826aea6a1668870bc229b7cb270b97d1",
+    "semantic_hash": "826aea6a1668870bc229b7cb270b97d1"
+  },
+  "docs/full_text/DPDPA-S27.1d.md": {
+    "mtime": 1788150634.2884467,
+    "seen": 1789434249.8865852,
+    "ast_hash": "454fc2ac73f874603eafc448dad48f43",
+    "semantic_hash": "454fc2ac73f874603eafc448dad48f43"
+  },
+  "docs/full_text/DPDPA-S28.md": {
+    "mtime": 1788150634.2904549,
+    "seen": 1789434249.8865905,
+    "ast_hash": "bbc96aff5cff8f95c6a62ed1a7478e21",
+    "semantic_hash": "bbc96aff5cff8f95c6a62ed1a7478e21"
+  },
+  "docs/full_text/DPDPA-S29.md": {
+    "mtime": 1788150634.291463,
+    "seen": 1789434249.886595,
+    "ast_hash": "da34d3a428584b177e6f05fa4ae47c54",
+    "semantic_hash": "da34d3a428584b177e6f05fa4ae47c54"
+  },
+  "docs/full_text/DPDPA-S3.md": {
+    "mtime": 1788150634.231669,
+    "seen": 1789434249.8866,
+    "ast_hash": "1a330e7cd8c21065e6da2a232ab2389e",
+    "semantic_hash": "1a330e7cd8c21065e6da2a232ab2389e"
+  },
+  "docs/full_text/DPDPA-S30.md": {
+    "mtime": 1788150634.2938416,
+    "seen": 1789434249.8866048,
+    "ast_hash": "1d127e78107f109be2c5b398309b8b9c",
+    "semantic_hash": "1d127e78107f109be2c5b398309b8b9c"
+  },
+  "docs/full_text/DPDPA-S31.md": {
+    "mtime": 1788150634.2958577,
+    "seen": 1789434249.8866096,
+    "ast_hash": "cb139d78962cdba7d33139b6143a14a9",
+    "semantic_hash": "cb139d78962cdba7d33139b6143a14a9"
+  },
+  "docs/full_text/DPDPA-S32.md": {
+    "mtime": 1788150634.2958577,
+    "seen": 1789434249.8866148,
+    "ast_hash": "6d9ae9e7b0ddfb13f5ba751d0a3669f7",
+    "semantic_hash": "6d9ae9e7b0ddfb13f5ba751d0a3669f7"
+  },
+  "docs/full_text/DPDPA-S33.md": {
+    "mtime": 1788150634.2978632,
+    "seen": 1789434249.8866196,
+    "ast_hash": "f3ab64dd3e749274a439344aaecbf0b5",
+    "semantic_hash": "f3ab64dd3e749274a439344aaecbf0b5"
+  },
+  "docs/full_text/DPDPA-S34.md": {
+    "mtime": 1788150634.2978632,
+    "seen": 1789434249.8866246,
+    "ast_hash": "a64d32dfe7d3631213bd70c34b71609e",
+    "semantic_hash": "a64d32dfe7d3631213bd70c34b71609e"
+  },
+  "docs/full_text/DPDPA-S35.md": {
+    "mtime": 1788150634.2978632,
+    "seen": 1789434249.8866313,
+    "ast_hash": "f768639ac89d854fd4aca6f2f3ed6c33",
+    "semantic_hash": "f768639ac89d854fd4aca6f2f3ed6c33"
+  },
+  "docs/full_text/DPDPA-S36.md": {
+    "mtime": 1788150634.3015537,
+    "seen": 1789434249.886636,
+    "ast_hash": "2f04d39eccabb953c7efc08e285414d6",
+    "semantic_hash": "2f04d39eccabb953c7efc08e285414d6"
+  },
+  "docs/full_text/DPDPA-S37.md": {
+    "mtime": 1788150634.3015537,
+    "seen": 1789434249.8866405,
+    "ast_hash": "ac42d99ab04f1e872b1f8c074c993a0a",
+    "semantic_hash": "ac42d99ab04f1e872b1f8c074c993a0a"
+  },
+  "docs/full_text/DPDPA-S38.md": {
+    "mtime": 1788150634.3042066,
+    "seen": 1789434249.8866453,
+    "ast_hash": "3e193728f65da4589723ccade6f01ce2",
+    "semantic_hash": "3e193728f65da4589723ccade6f01ce2"
+  },
+  "docs/full_text/DPDPA-S39.md": {
+    "mtime": 1788150634.3042066,
+    "seen": 1789434249.88665,
+    "ast_hash": "414aec97050db1f113df6200c138ca31",
+    "semantic_hash": "414aec97050db1f113df6200c138ca31"
+  },
+  "docs/full_text/DPDPA-S4.md": {
+    "mtime": 1788150634.234951,
+    "seen": 1789434249.886655,
+    "ast_hash": "d870c62b3820a4ef61c90e2bd6a223fe",
+    "semantic_hash": "d870c62b3820a4ef61c90e2bd6a223fe"
+  },
+  "docs/full_text/DPDPA-S40.md": {
+    "mtime": 1788150634.3042066,
+    "seen": 1789434249.8866599,
+    "ast_hash": "b63c276a5ee04d7c50bddf5c88b4a715",
+    "semantic_hash": "b63c276a5ee04d7c50bddf5c88b4a715"
+  },
+  "docs/full_text/DPDPA-S41.md": {
+    "mtime": 1788150634.3042066,
+    "seen": 1789434249.8866644,
+    "ast_hash": "7dcdf56e6691731aa9adedf059cda04e",
+    "semantic_hash": "7dcdf56e6691731aa9adedf059cda04e"
+  },
+  "docs/full_text/DPDPA-S42.md": {
+    "mtime": 1788150634.3042066,
+    "seen": 1789434249.8866694,
+    "ast_hash": "01885c4b362b3d09f7e2b7bc800acc2e",
+    "semantic_hash": "01885c4b362b3d09f7e2b7bc800acc2e"
+  },
+  "docs/full_text/DPDPA-S43.md": {
+    "mtime": 1788150634.3146641,
+    "seen": 1789434249.8866742,
+    "ast_hash": "20b381df1d8b2cd812fdfbd408f84c2a",
+    "semantic_hash": "20b381df1d8b2cd812fdfbd408f84c2a"
+  },
+  "docs/full_text/DPDPA-S44.1_3.md": {
+    "mtime": 1788150634.316697,
+    "seen": 1789434249.8866787,
+    "ast_hash": "a03937e7002203d4fa6bdfe3aadbd398",
+    "semantic_hash": "a03937e7002203d4fa6bdfe3aadbd398"
+  },
+  "docs/full_text/DPDPA-S44.2.md": {
+    "mtime": 1788150634.316697,
+    "seen": 1789434249.8866835,
+    "ast_hash": "49946e1c21c63c131788ad77ee6439cd",
+    "semantic_hash": "49946e1c21c63c131788ad77ee6439cd"
+  },
+  "docs/full_text/DPDPA-S5.md": {
+    "mtime": 1788150634.2396462,
+    "seen": 1789434249.8866882,
+    "ast_hash": "e7f64fae844c8ba753d05d845e16e28c",
+    "semantic_hash": "e7f64fae844c8ba753d05d845e16e28c"
+  },
+  "docs/full_text/DPDPA-S6.1_8_10.md": {
+    "mtime": 1788150634.2421875,
+    "seen": 1789434249.8866928,
+    "ast_hash": "ebbb4edcdce008242e888b6202929fbb",
+    "semantic_hash": "ebbb4edcdce008242e888b6202929fbb"
+  },
+  "docs/full_text/DPDPA-S6.9.md": {
+    "mtime": 1788150634.2421875,
+    "seen": 1789434249.8866978,
+    "ast_hash": "04fa56078b44fdca57243848012da467",
+    "semantic_hash": "04fa56078b44fdca57243848012da467"
+  },
+  "docs/full_text/DPDPA-S7.md": {
+    "mtime": 1788150634.245208,
+    "seen": 1789434249.8867025,
+    "ast_hash": "1a9befc800deaf491424f4c7ecbfe85a",
+    "semantic_hash": "1a9befc800deaf491424f4c7ecbfe85a"
+  },
+  "docs/full_text/DPDPA-S8.md": {
+    "mtime": 1788150634.2472131,
+    "seen": 1789434249.8867075,
+    "ast_hash": "ee35b4222f6b706fb5019459de1e9e0a",
+    "semantic_hash": "ee35b4222f6b706fb5019459de1e9e0a"
+  },
+  "docs/full_text/DPDPA-S9.md": {
+    "mtime": 1788150634.2472131,
+    "seen": 1789434249.8867126,
+    "ast_hash": "6678784a99ac779fb784c18960c20ceb",
+    "semantic_hash": "6678784a99ac779fb784c18960c20ceb"
+  },
+  "docs/full_text/DPDPA-SCHED.md": {
+    "mtime": 1788150634.3223662,
+    "seen": 1789434249.8867176,
+    "ast_hash": "e73811325f2634cf7dc0729f95e9a24f",
+    "semantic_hash": "e73811325f2634cf7dc0729f95e9a24f"
+  },
+  "docs/full_text/DPDPR-R1.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.886722,
+    "ast_hash": "88a9d4e7eb3dc6ee0a1ad0e56d2b3bdc",
+    "semantic_hash": "88a9d4e7eb3dc6ee0a1ad0e56d2b3bdc"
+  },
+  "docs/full_text/DPDPR-R10.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.8867269,
+    "ast_hash": "c3199ff5e21e03d28e8548c5880a29c7",
+    "semantic_hash": "c3199ff5e21e03d28e8548c5880a29c7"
+  },
+  "docs/full_text/DPDPR-R11.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.8867319,
+    "ast_hash": "54c5d7444609c790a72a997ecfcc6628",
+    "semantic_hash": "54c5d7444609c790a72a997ecfcc6628"
+  },
+  "docs/full_text/DPDPR-R12.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.8867364,
+    "ast_hash": "44d6ceac025d36088cb12ce90098e56c",
+    "semantic_hash": "44d6ceac025d36088cb12ce90098e56c"
+  },
+  "docs/full_text/DPDPR-R14.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.8867412,
+    "ast_hash": "a49171a8d9bb369dfc38bf10f39cea09",
+    "semantic_hash": "a49171a8d9bb369dfc38bf10f39cea09"
+  },
+  "docs/full_text/DPDPR-R15.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.8867462,
+    "ast_hash": "16f07684637a8851b542b9ca41f6da14",
+    "semantic_hash": "16f07684637a8851b542b9ca41f6da14"
+  },
+  "docs/full_text/DPDPR-R16.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.886751,
+    "ast_hash": "53f6d9e5e1cc7c73ad896be2f48e29dd",
+    "semantic_hash": "53f6d9e5e1cc7c73ad896be2f48e29dd"
+  },
+  "docs/full_text/DPDPR-R17.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.8867555,
+    "ast_hash": "36a807e0c3123647e71d8e592029212f",
+    "semantic_hash": "36a807e0c3123647e71d8e592029212f"
+  },
+  "docs/full_text/DPDPR-R18.md": {
+    "mtime": 1788117085.156575,
+    "seen": 1789434249.8867605,
+    "ast_hash": "0376f5e7504a09b50c1cc4605d7205f0",
+    "semantic_hash": "0376f5e7504a09b50c1cc4605d7205f0"
+  },
+  "docs/full_text/DPDPR-R19.md": {
+    "mtime": 1788117085.156575,
+    "seen": 1789434249.8867652,
+    "ast_hash": "7b1a1fd36d12fbf26605412ea0ba594e",
+    "semantic_hash": "7b1a1fd36d12fbf26605412ea0ba594e"
+  },
+  "docs/full_text/DPDPR-R2.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.8867702,
+    "ast_hash": "1d8d642c2a8d3c874fc7a4ac20eb6533",
+    "semantic_hash": "1d8d642c2a8d3c874fc7a4ac20eb6533"
+  },
+  "docs/full_text/DPDPR-R20.md": {
+    "mtime": 1788117085.1585848,
+    "seen": 1789434249.8867755,
+    "ast_hash": "ecfdb91035732c2d5038e3e2a5f09e94",
+    "semantic_hash": "ecfdb91035732c2d5038e3e2a5f09e94"
+  },
+  "docs/full_text/DPDPR-R21.md": {
+    "mtime": 1788117085.1585848,
+    "seen": 1789434249.8867805,
+    "ast_hash": "6958754143c461e0f67577c14d2437b6",
+    "semantic_hash": "6958754143c461e0f67577c14d2437b6"
+  },
+  "docs/full_text/DPDPR-R22.md": {
+    "mtime": 1788117085.1585848,
+    "seen": 1789434249.8867853,
+    "ast_hash": "2abdf1d3b09df0d78f36d98c0a2fe7ae",
+    "semantic_hash": "2abdf1d3b09df0d78f36d98c0a2fe7ae"
+  },
+  "docs/full_text/DPDPR-R23.md": {
+    "mtime": 1788117085.1605995,
+    "seen": 1789434249.88679,
+    "ast_hash": "ff0d1dc3136bdeae85093af219ba37c6",
+    "semantic_hash": "ff0d1dc3136bdeae85093af219ba37c6"
+  },
+  "docs/full_text/DPDPR-R3.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.886795,
+    "ast_hash": "c85c24623122649614f476d9ae55e77a",
+    "semantic_hash": "c85c24623122649614f476d9ae55e77a"
+  },
+  "docs/full_text/DPDPR-R4.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.8868,
+    "ast_hash": "93989b410acb515bca93fabce2510428",
+    "semantic_hash": "93989b410acb515bca93fabce2510428"
+  },
+  "docs/full_text/DPDPR-R5.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.886805,
+    "ast_hash": "f3e04fd974616da13e12593518b7aab2",
+    "semantic_hash": "f3e04fd974616da13e12593518b7aab2"
+  },
+  "docs/full_text/DPDPR-R6.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.8868098,
+    "ast_hash": "ff07e25128dfa041da78de2a3867f91e",
+    "semantic_hash": "ff07e25128dfa041da78de2a3867f91e"
+  },
+  "docs/full_text/DPDPR-R7.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.886815,
+    "ast_hash": "ddd02bb4f6fae25fdea40239f59a3da5",
+    "semantic_hash": "ddd02bb4f6fae25fdea40239f59a3da5"
+  },
+  "docs/full_text/DPDPR-R8.1_2.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.8868196,
+    "ast_hash": "1f6d30d71ec084c47c4b554711802fa6",
+    "semantic_hash": "1f6d30d71ec084c47c4b554711802fa6"
+  },
+  "docs/full_text/DPDPR-R8.3.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.8868244,
+    "ast_hash": "2718f477edb156fb27006c3468669091",
+    "semantic_hash": "2718f477edb156fb27006c3468669091"
+  },
+  "docs/full_text/DPDPR-R9.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.8868294,
+    "ast_hash": "70f87cbe20d8dfa9e63166030bdacc8f",
+    "semantic_hash": "70f87cbe20d8dfa9e63166030bdacc8f"
+  },
+  "docs/full_text/DPDPR-SCH1.md": {
+    "mtime": 1788117085.1605995,
+    "seen": 1789434249.8868341,
+    "ast_hash": "461748313b28e26f8f0b062a5cf69206",
+    "semantic_hash": "461748313b28e26f8f0b062a5cf69206"
+  },
+  "docs/full_text/DPDPR-SCH2.md": {
+    "mtime": 1788117085.1605995,
+    "seen": 1789434249.886842,
+    "ast_hash": "1611c7bd7ec5022f15ad4abb6e21acf9",
+    "semantic_hash": "1611c7bd7ec5022f15ad4abb6e21acf9"
+  },
+  "docs/full_text/DPDPR-SCH3.md": {
+    "mtime": 1788117085.1605995,
+    "seen": 1789434249.8868473,
+    "ast_hash": "7aff1bdb1a650aa20a094e91f993fa04",
+    "semantic_hash": "7aff1bdb1a650aa20a094e91f993fa04"
+  },
+  "docs/full_text/DPDPR-SCH4.md": {
+    "mtime": 1788117085.1605995,
+    "seen": 1789434249.886852,
+    "ast_hash": "14f347d57648cf9e79e9b24a5f923baa",
+    "semantic_hash": "14f347d57648cf9e79e9b24a5f923baa"
+  },
+  "docs/full_text/DPDPR-SCH5.md": {
+    "mtime": 1788117085.1605995,
+    "seen": 1789434249.8868573,
+    "ast_hash": "f3f74c35113656e40f7ee25e49a619c9",
+    "semantic_hash": "f3f74c35113656e40f7ee25e49a619c9"
+  },
+  "docs/full_text/DPDPR-SCH6.md": {
+    "mtime": 1788117085.1605995,
+    "seen": 1789434249.8868623,
+    "ast_hash": "feb1782dddf87a87fbbfe2b0fe53c105",
+    "semantic_hash": "feb1782dddf87a87fbbfe2b0fe53c105"
+  },
+  "docs/full_text/DPDPR-SCH7.md": {
+    "mtime": 1788117085.1605995,
+    "seen": 1789434249.8868673,
+    "ast_hash": "362b787a2c5ec43db242e61e5f5184bc",
+    "semantic_hash": "362b787a2c5ec43db242e61e5f5184bc"
+  },
+  "docs/full_text/DPDPR-SDF-R13.md": {
+    "mtime": 1788117085.140759,
+    "seen": 1789434249.8868723,
+    "ast_hash": "ea0f3ecc13b06fee35a5e931215ee307",
+    "semantic_hash": "ea0f3ecc13b06fee35a5e931215ee307"
+  },
+  "graphify-out/converted/DPDP_Act_2023_7c48f170.md": {
+    "mtime": 1789433438.0367022,
+    "seen": 1789434249.8868773,
+    "ast_hash": "a602640a75901ac44278750fa642e43b",
+    "semantic_hash": "a602640a75901ac44278750fa642e43b"
+  },
+  "graphify-out/converted/DPDP_Rules_2025_86745c80.md": {
+    "mtime": 1789433438.411518,
+    "seen": 1789434249.886882,
+    "ast_hash": "0a4c00d9edd512be8c67387e633fd4d9",
+    "semantic_hash": "0a4c00d9edd512be8c67387e633fd4d9"
+  },
+  "graphify-out/converted/DPDP_Rules_Tracker_106b1f53.md": {
+    "mtime": 1789433437.4643705,
+    "seen": 1789434249.886887,
+    "ast_hash": "0a1293903ff041926d554f463b8d03ab",
+    "semantic_hash": "0a1293903ff041926d554f463b8d03ab"
+  },
+  "requirements.txt": {
+    "mtime": 1788168521.6517363,
+    "seen": 1789434249.886892,
+    "ast_hash": "7cd7c99a288bf7c25e3df80ab158cf9b",
+    "semantic_hash": "7cd7c99a288bf7c25e3df80ab158cf9b"
+  }
+}
