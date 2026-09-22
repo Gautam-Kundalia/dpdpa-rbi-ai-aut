@@ -50,11 +50,18 @@ def _build_body(applied_changes: list[dict], errors: list[str]) -> tuple[str, st
     today = date.today().isoformat()
     n = len(applied_changes)
 
-    if n == 0:
+    if errors:
+        subject = f"DPDP Monitor — {len(errors)} error(s) today ({today})" + (
+            f", {n} change{'s' if n != 1 else ''} applied" if n else ""
+        )
+    elif n == 0:
         subject = f"DPDP Monitor — No changes detected today ({today})"
-        lines = ["No changes were detected across PIB, MeitY, or eGazette today."]
     else:
         subject = f"DPDP Monitor — {n} change{'s' if n != 1 else ''} applied today ({today})"
+
+    if n == 0:
+        lines = ["No changes were detected across PIB, MeitY, or eGazette today."]
+    else:
         lines = [f"{n} change{'s' if n != 1 else ''} applied today:\n"]
         for c in applied_changes:
             lines.append(f"  - {c['provision_id']} — {c['change_type']}: {c['new_value_summary']}")

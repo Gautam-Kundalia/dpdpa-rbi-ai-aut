@@ -1,6 +1,7 @@
 """
 Classify a changed source's content against current `provisions` using
-OpenRouter, returning strict JSON matching the change_log schema fields.
+Claude (forced tool-use), returning strict JSON matching the change_log
+schema fields.
 
 Usage:
     from classify_change import classify
@@ -8,21 +9,38 @@ Usage:
 """
 from __future__ import annotations
 
-import json
 import os
 
-import requests
+import anthropic
 from dotenv import load_dotenv
 
 from db import PROJECT_ROOT
 
 load_dotenv(PROJECT_ROOT / ".env")
 
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
-OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "nvidia/nemotron-3-ultra-550b-a55b:free")
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5")
 
 VALID_CHANGE_TYPES = {"New Provision", "Amendment", "Repeal", "Clarification", "Correction"}
+
+# How many times to try the AI call before giving up on a source for
+# this run. Originally sized against the free-tier OpenRouter model,
+# which failed intermittently (~1-in-3 in a small sample) under this
+# pipeline's large prompt. Kept at 3 as defense-in-depth for transient
+# API/network failures even on Claude's enforced-schema tool-use path,
+# where a malformed response is no longer expected.
+MAX_CLASSIFY_ATTEMPTS = 3
+
+
+class ClassificationFailed(Exception):
+    """
+    Raised by classify() when the AI call/response never became usable
+    after MAX_CLASSIFY_ATTEMPTS tries. Fixes a real bug: the previous
+    version swallowed this and returned [], indistinguishable from "AI
+    genuinely found nothing." Now a real failure is a real, raised
+    error that reaches run_pipeline.py's error list, exit code, and the
+    summary email.
+    """
 
 SYSTEM_PROMPT = """You are a legal-text change detector for a DPDP (Digital Personal Data \
 Protection) Act/Rules compliance tracker. You are given:
@@ -72,6 +90,25 @@ def _current_provisions(conn) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def _relevant_provisions(conn, fetch_result) -> list[dict]:
+    """
+    Narrow the provisions list to the relevant instrument when the source
+    is a known single-instrument document, so we're not sending every Act
+    section's text on a Rules-only fetch (and vice versa). Never truncates
+    an individual provision's own text — only narrows which provisions are
+    included at all.
+    """
+    all_provisions = _current_provisions(conn)
+    if "2025/11" in fetch_result.url:      # MeitY Rules PDF
+        prefix = "DPDPR-"
+    elif "2024/06" in fetch_result.url:    # MeitY Act PDF
+        prefix = "DPDPA-"
+    else:                                   # PIB / eGazette: could be either
+        return all_provisions
+    filtered = [p for p in all_provisions if p["provision_id"].startswith(prefix)]
+    return filtered or all_provisions   # fail open if the filter matches nothing
+
+
 def _build_user_prompt(fetch_result, provisions: list[dict]) -> str:
     prov_lines = "\n".join(
         f"- {p['provision_id']} ({p['reference']}): {p['current_summary'] or ''}\n"
@@ -87,30 +124,52 @@ def _build_user_prompt(fetch_result, provisions: list[dict]) -> str:
     )
 
 
-def _call_openrouter(user_prompt: str) -> str:
-    if not OPENROUTER_API_KEY:
-        raise RuntimeError("OPENROUTER_API_KEY is not set (check .env / GitHub secret)")
-    resp = requests.post(
-        OPENROUTER_URL,
-        headers={
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "Content-Type": "application/json",
+CHANGES_TOOL = {
+    "name": "report_changes",
+    "description": "Report any real, verbatim legal changes found in the fetched content. Call this even if the list is empty.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "changes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "provision_id": {"type": "string"},
+                        "change_type": {"type": "string", "enum": sorted(VALID_CHANGE_TYPES)},
+                        "old_value_summary": {"type": "string"},
+                        "new_value_summary": {"type": "string"},
+                        "old_full_text": {"type": ["string", "null"]},
+                        "new_full_text": {"type": ["string", "null"]},
+                        "confidence_score": {"type": "number"},
+                    },
+                    "required": ["provision_id", "change_type", "old_value_summary",
+                                  "new_value_summary", "old_full_text", "new_full_text",
+                                  "confidence_score"],
+                },
+            }
         },
-        json={
-            "model": OPENROUTER_MODEL,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": 0,
-            "max_tokens": 4096,
-            "response_format": {"type": "json_object"},
-        },
-        timeout=120,
+        "required": ["changes"],
+    },
+}
+
+
+def _call_claude(user_prompt: str) -> dict:
+    if not ANTHROPIC_API_KEY:
+        raise RuntimeError("ANTHROPIC_API_KEY is not set (check .env / GitHub secret)")
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    resp = client.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=4096,
+        system=SYSTEM_PROMPT,
+        tools=[CHANGES_TOOL],
+        tool_choice={"type": "tool", "name": "report_changes"},
+        messages=[{"role": "user", "content": user_prompt}],
     )
-    resp.raise_for_status()
-    data = resp.json()
-    return data["choices"][0]["message"]["content"]
+    for block in resp.content:
+        if block.type == "tool_use" and block.name == "report_changes":
+            return block.input
+    raise RuntimeError("Claude response had no report_changes tool_use block")
 
 
 def _validate(parsed: dict, provisions: list[dict]) -> list[dict]:
@@ -140,22 +199,27 @@ def _validate(parsed: dict, provisions: list[dict]) -> list[dict]:
 
 def classify(fetch_result, conn) -> list[dict]:
     """
-    Classify one changed source. Returns a validated list of change dicts
-    (possibly empty). On a parse/validation failure, retries once; if it
-    still fails, marks source_log.processing_status='Error' for this
-    source's document_id and returns [] (skip auto-apply for that item).
+    Classify one changed source. Returns a validated list of change dicts —
+    an empty list is a legitimate success meaning the AI found no real
+    change. On a parse/validation failure, retries up to
+    MAX_CLASSIFY_ATTEMPTS times; if it still fails, marks
+    source_log.processing_status='Error' for this source's document_id and
+    raises ClassificationFailed (it does NOT return [] — that would be
+    indistinguishable from a genuine "no change" result).
     """
-    provisions = _current_provisions(conn)
+    provisions = _relevant_provisions(conn, fetch_result)
     user_prompt = _build_user_prompt(fetch_result, provisions)
 
     last_error = None
-    for attempt in range(2):
+    last_raw = None
+    for attempt in range(MAX_CLASSIFY_ATTEMPTS):
+        parsed = None
         try:
-            raw_response = _call_openrouter(user_prompt)
-            parsed = json.loads(raw_response)
+            parsed = _call_claude(user_prompt)
             return _validate(parsed, provisions)
         except Exception as exc:
             last_error = exc
+            last_raw = parsed
             print(f"[classify_change] attempt {attempt + 1} failed for {fetch_result.document_id}: {exc}")
 
     conn.execute(
@@ -163,5 +227,12 @@ def classify(fetch_result, conn) -> list[dict]:
         (fetch_result.document_id,),
     )
     conn.commit()
-    print(f"[classify_change] giving up on {fetch_result.document_id} after retry: {last_error}")
-    return []
+    # last_raw is a dict (Claude's tool_use.input) or None, not a raw string —
+    # str() it before slicing so a shape/validation failure (_validate raised
+    # after a successful, well-formed tool call) still shows what came back.
+    raw_snippet = f" — raw model output: {str(last_raw)[:300]!r}" if last_raw else ""
+    print(f"[classify_change] giving up on {fetch_result.document_id} after {MAX_CLASSIFY_ATTEMPTS} attempts: {last_error}{raw_snippet}")
+    raise ClassificationFailed(
+        f"could not get a valid classification for {fetch_result.document_id} "
+        f"({fetch_result.source} — {fetch_result.url}) after {MAX_CLASSIFY_ATTEMPTS} attempts: {last_error!r}{raw_snippet}"
+    ) from last_error

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 from db import next_id
 
-DETECTED_BY_PREFIX = "agent:openrouter"
+DETECTED_BY_PREFIX = "agent:anthropic"
 
 
 def _make_anchor(provision_id: str) -> str:

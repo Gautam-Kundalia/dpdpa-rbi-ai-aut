@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 from apply_change import apply
-from classify_change import OPENROUTER_MODEL, classify
+from classify_change import CLAUDE_MODEL, ClassificationFailed, classify
 from db import get_connection, init_schema
 from fetch_sources import fetch_all
 from notify import send_summary
@@ -31,13 +31,23 @@ def main() -> int:
     for fetch_result in changed_sources:
         try:
             classified = classify(fetch_result, conn)
-        except Exception as exc:
-            errors.append(f"classify_change failed for {fetch_result.document_id} ({fetch_result.url}): {exc}")
+        except ClassificationFailed as exc:
+            errors.append(str(exc))
             continue
+        except Exception as exc:
+            errors.append(f"classify_change failed unexpectedly for {fetch_result.document_id} ({fetch_result.url}): {exc}")
+            continue
+
+        if not classified:
+            conn.execute(
+                "UPDATE source_log SET processing_status = 'No Change Detected' WHERE document_id = ?",
+                (fetch_result.document_id,),
+            )
+            conn.commit()
 
         for change in classified:
             try:
-                change_id = apply(change, fetch_result, conn, OPENROUTER_MODEL)
+                change_id = apply(change, fetch_result, conn, CLAUDE_MODEL)
                 applied_changes.append({**change, "change_id": change_id})
                 print(f"[run_pipeline] applied {change_id} -> {change['provision_id']} ({change['change_type']})")
             except Exception as exc:
