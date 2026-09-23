@@ -172,15 +172,19 @@ def fetch_provisions(conn, docx_relpath):
 
 def fetch_latest_amendment(conn, provision_id):
     """
-    Returns the most recent applied change for this provision IF it represents
-    an actual amendment (not the initial 'New Provision' load) — i.e. the
-    highlight/strikethrough mechanism this function feeds only activates once
-    real changes start flowing through the pipeline.
+    Returns the change that provisions.latest_change_id points at IF it
+    represents an actual regulatory amendment (not the initial 'New Provision'
+    load). Keying on latest_change_id — rather than "the newest change_log row
+    of any non-'New Provision' type" — is what lets one-time internal data
+    corrections (change_log rows that deliberately do NOT repoint
+    latest_change_id, e.g. CHG-0033..CHG-0039) stay in the audit trail without
+    being rendered as if the government had amended the law.
     """
     row = conn.execute(
-        "SELECT change_type, old_full_text, new_full_text FROM change_log "
-        "WHERE provision_id = ? AND applied_to_master = 'Y' AND change_type != 'New Provision' "
-        "ORDER BY detected_timestamp DESC LIMIT 1",
+        "SELECT c.change_type, c.old_full_text, c.new_full_text "
+        "FROM provisions p JOIN change_log c ON c.change_id = p.latest_change_id "
+        "WHERE p.provision_id = ? AND c.applied_to_master = 'Y' "
+        "AND c.change_type != 'New Provision'",
         (provision_id,),
     ).fetchone()
     return row
