@@ -220,3 +220,35 @@ its own:
   against the Act. Treat this as a strong, source-verified draft correction,
   not a closed item — the next step is that human read-through, not further
   automated changes.
+
+## Closing update — 2026-09-23, later the same day: superseded by a full rebuild
+
+This document's 7-row spot-fix was always a stopgap — §2's own "Everything
+else (39 rows)" section said so explicitly: most of the table was still a
+condensed paraphrase, not verbatim, and warranted "a further, dedicated
+human legal review of all 44 sections... before this table is treated as
+authoritative."
+
+That full rebuild has now happened. Per Gautam's decision (option (a) from
+the full audit report's §8: rebuild every row word-for-word from the PDF),
+`scripts/rebuild_act_verbatim_2026-09-23.py` mechanically extracted and
+verified all 48 `DPDPA-*` rows — not just the 7 flagged here — against the
+same hash-verified PDF this document used. **46 of the 48 rows changed**
+(the 7 corrected in this document are included in that 46, since the earlier
+fix, while accurate, was not verbatim — it corrected the substance but still
+paraphrased in places, and Section 2's declared-subset-of-definitions design
+decision was also reversed to carry all 28 definitions).
+
+Full detail, including per-row similarity scores, which mechanical checks
+passed, and word-level diffs, is in `docs/act_verbatim_rebuild_2026-09-23.md`.
+That document is now the authoritative record of the Act table's text; this
+one remains as the historical record of how the first 7 corrections were
+found and reasoned about — the analysis above (the "Benches"/Evidence-Act/
+TRAI-Act findings, the provenance investigation) is still accurate and
+worth reading, it's just no longer the final state of `provisions.full_text`.
+
+Recorded as `change_type='Correction'`, `change_origin='data_correction'`
+(this is us fixing our own transcription, not the government changing the
+law — never highlighted in the Word document or Excel tracker), with
+`latest_change_id` left untouched on every row, same discipline as the
+original 7-row fix.
