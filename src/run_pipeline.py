@@ -24,20 +24,33 @@ def main() -> int:
     conn = get_connection()
     init_schema(conn)
 
-    changed_sources = fetch_all(conn)
-    print(f"[run_pipeline] {len(changed_sources)} source(s) changed.")
-
     applied_changes: list[dict] = []
     errors: list[str] = []
+
+    changed_sources = fetch_all(conn, fetch_errors=errors)
+    print(f"[run_pipeline] {len(changed_sources)} source(s) changed.")
 
     for fetch_result in changed_sources:
         try:
             classified = classify(fetch_result, conn)
-        except ClassificationFailed as exc:
-            errors.append(str(exc))
-            continue
         except Exception as exc:
-            errors.append(f"classify_change failed unexpectedly for {fetch_result.document_id} ({fetch_result.url}): {exc}")
+            if isinstance(exc, ClassificationFailed):
+                errors.append(str(exc))
+            else:
+                errors.append(
+                    f"classify_change failed unexpectedly for {fetch_result.document_id} "
+                    f"({fetch_result.url}): {exc}"
+                )
+            # Put the previous hash back so tomorrow's run sees this source as
+            # still changed and retries it. Without this, a single failed day
+            # silently and permanently drops the change (the new hash is
+            # already stored in source_log, so the next run would report "no
+            # change" and never look at it again).
+            conn.execute(
+                "UPDATE source_log SET content_hash = ? WHERE document_id = ?",
+                (fetch_result.prior_hash, fetch_result.document_id),
+            )
+            conn.commit()
             continue
 
         if not classified:

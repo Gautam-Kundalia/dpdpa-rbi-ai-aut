@@ -1,8 +1,15 @@
-requests>=2.31
-beautifulsoup4>=4.12
-pypdf>=4.0
-python-dotenv>=1.0
-pyyaml>=6.0
-openpyxl>=3.1
-python-docx>=1.1
-anthropic>=0.40
+requests==2.34.2
+beautifulsoup4==4.15.0
+# Pinned exactly, not just >=: pypdf's text extraction changed between
+# versions enough to change the SHA-256 of the *extracted text* for the
+# same PDF bytes (pypdf 3.17.4 gave a different fingerprint than 6.19.0 for
+# the same Act PDF) — an unpinned upgrade could make every source look
+# "changed" overnight and burn the AI budget re-classifying nothing. Tested:
+# reproduces the exact stored hashes for both the Act and Rules PDFs.
+pypdf==6.19.0
+python-dotenv==1.2.3
+pyyaml==6.0.3
+openpyxl==3.1.5
+python-docx==1.2.0
+anthropic==1.8.0
+pytest==9.1.1

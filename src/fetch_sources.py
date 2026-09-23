@@ -85,6 +85,8 @@ class FetchResult:
     content_text: str
     content_hash: str
     changed: bool
+    prior_hash: str | None = None  # restored by run_pipeline if classification fails,
+                                    # so the change is retried next run instead of lost
 
 
 def _extract_text(raw: bytes, kind: str) -> str:
@@ -153,7 +155,7 @@ def _upsert_source_log(conn, *, url, source, title, published_date, fetched_date
     return doc_id
 
 
-def fetch_all(conn=None) -> list[FetchResult]:
+def fetch_all(conn=None, fetch_errors: list[str] | None = None) -> list[FetchResult]:
     """
     Fetch every configured source. For each: hash it, compare to the last
     known hash for that URL, and insert a source_log row.
@@ -162,7 +164,10 @@ def fetch_all(conn=None) -> list[FetchResult]:
     first time) — these are the ones classify_change.py should look at.
     Sources that failed to fetch get processing_status='Error' and are
     skipped (not included in the return list); one source's fetch failure
-    must not block the others.
+    must not block the others. If `fetch_errors` is passed, each download
+    failure is appended to it so run_pipeline.py's exit code and email
+    reflect the failure (previously these were silent: printed but never
+    surfaced, so a broken source could fail for days with a green run).
     """
     owns_conn = conn is None
     if owns_conn:
@@ -183,12 +188,20 @@ def fetch_all(conn=None) -> list[FetchResult]:
             # content is unchanged.
             content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
         except Exception as exc:
+            # Keep the last good hash on a fetch failure, don't blank it —
+            # writing NULL here made the *next successful* fetch look like a
+            # "change" and re-trigger classification of content that never
+            # actually changed.
+            existing_before_error = _existing_row(conn, url)
+            last_good_hash = existing_before_error["content_hash"] if existing_before_error else None
             _upsert_source_log(
                 conn, url=url, source=src["source"], title=src["title"],
                 published_date=None, fetched_date=today,
-                content_hash=None, processing_status="Error",
+                content_hash=last_good_hash, processing_status="Error",
             )
             print(f"[fetch_sources] ERROR fetching {src['source']} ({url}): {exc}")
+            if fetch_errors is not None:
+                fetch_errors.append(f"fetch failed for {src['source']} ({url}): {exc}")
             continue
 
         existing = _existing_row(conn, url)
@@ -212,6 +225,7 @@ def fetch_all(conn=None) -> list[FetchResult]:
                     content_text=text,
                     content_hash=content_hash,
                     changed=True,
+                    prior_hash=prior_hash,
                 )
             )
         print(
