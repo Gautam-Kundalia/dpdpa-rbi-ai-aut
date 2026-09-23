@@ -262,3 +262,49 @@ uncommitted, matching the requested commit scope.
 ### Cost
 
 $0 (mechanical script + local exports; no API calls this entry).
+
+## 2026-09-23 — Full audit (Cowork), report only — NO code/DB/doc changes
+
+Independent audit of the whole tracker; full report and all drafts in
+`docs/audit_2026-09-23/` (start with `DPDP_Tracker_Full_Audit_2026-09-23.md`).
+Nothing in `src/`, `db/`, `docs/*.docx` or `data/` was modified. Headlines:
+
+- `docs/DPDP_Act_2023.docx` (committed in `fd476a7`) renders all 7 corrected
+  Act rows with the amendment highlight + struck-through "Previous text
+  (superseded)" — `export_word.py` never reads `latest_change_id`. Fix drafted
+  and tested (`draft_code_fixes.patch`), not applied.
+- Scheduled runs execute `main`, which has none of `fbd1c4e`/`fd476a7`;
+  production had a silent source failure on 7 of 8 days (15–22 Sep).
+- Corrigendum G.S.R. 892(E) (10 Dec 2025) confirmed from the MeitY-hosted
+  Gazette PDF (SHA-256 8f8d9526…32f994); it fixes Rule 1(3)/(4), 13(5), 23(1)
+  and Schedule typos. DB still holds the uncorrected text (draft script ready).
+- Commencement dates verified against the primary G.S.R. 843(E) PDF — all
+  correct; 13 Nov is the Gazette's face date (14 Nov = e-Gazette ID/digital
+  signature only).
+- Rules table (never checked before): all 23 Rules verbatim; Schedule
+  Notes/illustration omitted; Third Schedule paraphrased.
+- Act table: 12 further rows contain statements not in the Act (e.g. S8(4)
+  invented condition, S22(3) invented proviso, S29(9) "section 18B", S37
+  IT Act s.69A reference, S40 wrong rule-making list).
+- Act PDF max_tokens: new theory — API buffers the single `changes` tool
+  parameter, so the earlier "empty output" diagnostic could not distinguish
+  "wrote nothing" from "wrote a huge list". Eager-streaming diagnostic drafted
+  (not run). Warning: a "successful" call would auto-apply dozens of
+  paraphrase "Corrections" via apply_change.py.
+- Cost: $0 API.
+
+## 2026-09-23 — Word export highlighting fix applied (Cowork, approved by Gautam) — uncommitted
+
+- `src/export_word.py`: amendment highlighting now keys on
+  `provisions.latest_change_id` instead of "newest non-'New Provision' change_log
+  row". In plain words: our own data corrections (CHG-0033–CHG-0039) no longer
+  show up in the Word document as if the government had amended the Act.
+- `docs/DPDP_Act_2023.docx` regenerated from the unchanged `db/dpdpa.db`:
+  verified 0 highlights, 0 strikethroughs, no "Previous text (superseded)"
+  labels; corrected wording present. A simulated real amendment still
+  highlights. Rules docx not regenerated.
+- Gautam's decisions recorded for the follow-up Claude Code run
+  (`docs/audit_2026-09-23/CLAUDE_CODE_PROMPT_apply_audit_fixes.md`): highlight
+  only real regulatory changes and only the changed words (docx, Excel, email);
+  G.S.R. 892(E) corrigendum treated as a regulatory change; rebuild all 48 Act
+  rows verbatim from the official PDF; merge to `main` after all tests pass.
