@@ -1,0 +1,3220 @@
+# Act verbatim rebuild -- 23 Sep 2026
+
+Rebuilt all 48 `DPDPA-*` rows' `full_text` word-for-word from the official Act PDF (`docs/full_text/DPDP_Act_2023_official_2026-09-23.pdf`, SHA-256 `4deb23981d3010c8225a2ff6149e7243dc2268455b299e283afebdd7b72a7d15`) via `scripts/rebuild_act_verbatim_2026-09-23.py`. Every word came out of the PDF through that script -- nothing here was typed by hand.
+
+**Extractor note:** the spec called for PyMuPDF as the primary extractor; it could not load on this machine (Windows Application Control blocked its native DLL). pdfplumber was substituted -- an independent, actively maintained PDF text library with the same word-position capability. pypdf remains the independent second extractor for C2.
+
+## Per-row results
+
+| Row | Similarity (old vs new) | C1 | C2 | C4 |
+|---|---|---|---|---|
+| DPDPA-S1 | 1.000 | OK | OK | clean |
+| DPDPA-S2 | 0.522 | OK | OK | clean |
+| DPDPA-S3 | 0.902 | OK | OK | clean |
+| DPDPA-S4 | 0.938 | OK | OK | clean |
+| DPDPA-S5 | 0.453 | OK | OK | clean |
+| DPDPA-S6.1_8_10 | 0.473 | OK | OK | clean |
+| DPDPA-S6.9 | 0.751 | OK | OK | clean |
+| DPDPA-S7 | 0.762 | OK | OK | clean |
+| DPDPA-S8 | 0.588 | OK | OK | clean |
+| DPDPA-S9 | 0.527 | OK | OK | clean |
+| DPDPA-S10 | 0.490 | OK | OK | clean |
+| DPDPA-S11 | 0.596 | OK | OK | clean |
+| DPDPA-S12 | 0.381 | OK | OK | clean |
+| DPDPA-S13 | 0.834 | OK | OK | clean |
+| DPDPA-S14 | 0.676 | OK | OK | clean |
+| DPDPA-S15 | 0.802 | OK | OK | clean |
+| DPDPA-S16 | 0.882 | OK | OK | clean |
+| DPDPA-S17 | 0.883 | OK | OK | clean |
+| DPDPA-S18 | 0.918 | OK | OK | clean |
+| DPDPA-S19 | 0.771 | OK | OK | clean |
+| DPDPA-S20 | 0.640 | OK | OK | clean |
+| DPDPA-S21 | 0.397 | OK | OK | clean |
+| DPDPA-S22 | 0.293 | OK | OK | clean |
+| DPDPA-S23 | 0.254 | OK | OK | clean |
+| DPDPA-S24 | 0.642 | OK | OK | clean |
+| DPDPA-S25 | 0.978 | OK | OK | clean |
+| DPDPA-S26 | 0.998 | OK | OK | clean |
+| DPDPA-S27.1a_c_e_2_3 | 0.317 | OK | OK | clean |
+| DPDPA-S27.1d | 0.508 | OK | OK | clean |
+| DPDPA-S28 | 0.998 | OK | OK | clean |
+| DPDPA-S29 | 0.667 | OK | OK | clean |
+| DPDPA-S30 | 0.998 | OK | OK | clean |
+| DPDPA-S31 | 0.857 | OK | OK | clean |
+| DPDPA-S32 | 0.293 | OK | OK | clean |
+| DPDPA-S33 | 0.126 | OK | OK | clean |
+| DPDPA-S34 | 0.998 | OK | OK | clean |
+| DPDPA-S35 | 0.960 | OK | OK | clean |
+| DPDPA-S36 | 0.840 | OK | OK | clean |
+| DPDPA-S37 | 0.298 | OK | OK | clean |
+| DPDPA-S38 | 0.997 | OK | OK | clean |
+| DPDPA-S39 | 0.496 | OK | OK | clean |
+| DPDPA-S40 | 0.556 | OK | OK | clean |
+| DPDPA-S41 | 0.979 | OK | OK | clean |
+| DPDPA-S42 | 1.000 | OK | OK | clean |
+| DPDPA-S43 | 0.707 | OK | OK | clean |
+| DPDPA-S44.1_3 | 0.987 | OK | OK | clean |
+| DPDPA-S44.2 | 0.805 | OK | OK | clean |
+| DPDPA-SCHED | 0.806 | OK | OK | clean |
+
+## Rows with substantial changes (similarity < 0.85)
+
+### DPDPA-S2 (similarity 0.522)
+
+```
+--- 
++++ 
+@@ -2,46 +2,100 @@
+ 2
+ —
+ Definitions**
+-Key
+-definitions
+-(this
+-tracker
+-reproduces
+-the
+-terms
+-most
+-used
+-elsewhere
+-in
+-it;
+-consult
+-the
+-Act's
+-full
+-text
+-for
+-the
+-complete
+-list
+-of
+-28
+-defined
+-terms):
+-(c)
+-"Board"
+-means
+-the
+-Data
+-Protection
+-Board
+-of
+-India
++In
++this
++Act,
++unless
++the
++context
++otherwise
++requires,—
++(a)
++“Appellate
++Tribunal”
++means
++the
++Telecom
++Disputes
++Settlement
++and
++Appellate
++Tribunal
+ established
+ under
+ section
+-18.
++14
++of
++the
++Telecom
++Regulatory
++Authority
++of
++India
++Act,
++1997;
++(b)
++“automated”
++means
++any
++digital
++process
++capable
++of
++operating
++automatically
++in
++response
++to
++instructions
++given
++or
++otherwise
++for
++the
++purpose
++of
++processing
++data;
++(c)
++“Board”
++means
++the
++Data
++Protection
++Board
++of
++India
++established
++by
++the
++Central
++Government
++under
++section
++18;
++(d)
++“certain
++legitimate
++uses”
++means
++the
++uses
+```
+
+### DPDPA-S5 (similarity 0.453)
+
+```
+--- 
++++ 
+@@ -33,8 +33,7 @@
+ Data
+ Principal,
+ informing
+-her
+-—
++her,—
+ (i)
+ the
+ personal
+@@ -76,7 +75,9 @@
+ manner
+ in
+ which
+-she
++the
++Data
++Principal
+ may
+ make
+ a
+@@ -92,6 +93,78 @@
+ may
+ be
+ prescribed.
++Illustration.
++X,
++an
++individual,
++opens
++a
++bank
++account
++using
++the
++mobile
++app
++or
++website
++of
++Y,
++a
++bank.
++To
++complete
++the
++Know-Your-Customer
++requirements
++under
++law
++for
++opening
++of
++bank
++account,
++X
++opts
++for
++processing
++of
++her
++personal
++data
++by
++Y
++in
++a
++live,
++video-based
++customer
++identification
++process.
++Y
++shall
++accompany
++or
++precede
++the
++request
++for
++the
++personal
++data
++with
++notice
++to
++X,
++describing
++the
++personal
++data
++and
++the
++purpose
++of
++its
++processing.
+ (2)
+ Where
+ a
+@@ -101,7 +174,7 @@
+ given
+ her
+ consent
+-to
++for
+ the
+ processing
+ of
+@@ -110,10 +183,13 @@
+ data
+ before
+ the
++date
++of
+ commencement
+ of
+ this
+```
+
+### DPDPA-S6.1_8_10 (similarity 0.473)
+
+```
+--- 
++++ 
+@@ -53,13 +53,84 @@
+ such
+ specified
+ purpose.
++Illustration.
++X,
++an
++individual,
++downloads
++Y,
++a
++telemedicine
++app.
++Y
++requests
++the
++consent
++of
++X
++for
++(i)
++the
++processing
++of
++her
++personal
++data
++for
++making
++available
++telemedicine
++services,
++and
++(ii)
++accessing
++her
++mobile
++phone
++contact
++list,
++and
++X
++signifies
++her
++consent
++to
++both.
++Since
++phone
++contact
++list
++is
++not
++necessary
++for
++making
++available
++telemedicine
++services,
++her
++consent
++shall
++be
++limited
++to
++the
++processing
++of
++her
++personal
++data
++for
++making
++available
++telemedicine
++services.
+ (2)
+ Any
+ part
+ of
+ consent
+ referred
+-to
+ in
+ sub-section
+ (1)
+@@ -97,6 +168,81 @@
+ of
+ such
+ infringement.
++Illustration.
++X,
++an
++individual,
++buys
++an
++insurance
++policy
++using
++the
++mobile
++app
++or
++website
++of
++Y,
++an
++insurer.
++She
++gives
++to
++Y
++her
++consent
++for
++(i)
++the
++processing
+```
+
+### DPDPA-S6.9 (similarity 0.751)
+
+```
+--- 
++++ 
+@@ -1,10 +1,8 @@
+ **Section
+ 6(9)
+ —
+-Registration
+-of
+-Consent
+-Manager**
++Consent**
++(9)
+ Every
+ Consent
+ Manager
+@@ -31,19 +29,3 @@
+ may
+ be
+ prescribed.
+-Operationalised
+-by
+-Rule
+-4
+-and
+-the
+-First
+-Schedule
+-of
+-the
+-DPDP
+-Rules,
+-2025
+-(see
+-DPDPR-R4,
+-DPDPR-SCH1).
+```
+
+### DPDPA-S7 (similarity 0.762)
+
+```
+--- 
++++ 
+@@ -18,12 +18,9 @@
+ for
+ any
+ of
+-the
+ following
+-legitimate
+ uses,
+-namely
+-—
++namely:—
+ (a)
+ for
+ the
+@@ -68,7 +65,133 @@
+ of
+ her
+ personal
+-data;
++data.
++Illustrations.
++(I)
++X,
++an
++individual,
++makes
++a
++purchase
++at
++Y,
++a
++pharmacy.
++She
++voluntarily
++provides
++Y
++her
++personal
++data
++and
++requests
++Y
++to
++acknowledge
++receipt
++of
++the
++payment
++made
++for
++the
++purchase
++by
++sending
++a
++message
++to
++her
++mobile
++phone.
++Y
++may
++process
++the
++personal
++data
++of
++X
++for
++the
++purpose
++of
++sending
++the
++receipt.
++(II)
++X,
++an
++individual,
++electronically
++messages
++Y,
++a
++real
++estate
++broker,
++requesting
++Y
++to
++help
++identify
++a
++suitable
++rented
++accommodation
++for
++her
++and
++shares
++her
++personal
++data
++for
++this
++purpose.
++Y
++may
++process
++her
++personal
++data
++to
++identify
++and
++intimate
++to
++her
++the
+```
+
+### DPDPA-S8 (similarity 0.588)
+
+```
+--- 
++++ 
+@@ -7,7 +7,11 @@
+ Data
+ Fiduciary**
+ (1)
+-Irrespective
++A
++Data
++Fiduciary
++shall,
++irrespective
+ of
+ any
+ agreement
+@@ -29,10 +33,6 @@
+ under
+ this
+ Act,
+-the
+-Data
+-Fiduciary
+-shall
+ be
+ responsible
+ for
+@@ -71,7 +71,7 @@
+ may
+ engage,
+ appoint,
+-employ,
++use
+ or
+ otherwise
+ involve
+@@ -107,14 +107,16 @@
+ Where
+ personal
+ data
+-of
+-a
+-Data
+-Principal
++processed
++by
++a
++Data
++Fiduciary
+ is
+ likely
+ to
+-be
++be—
++(a)
+ used
+ to
+ make
+@@ -122,12 +124,11 @@
+ decision
+ that
+ affects
+-her,
+-or
+-is
+-likely
+-to
+-be
++the
++Data
++Principal;
++or
++(b)
+ disclosed
+ to
+ another
+@@ -136,38 +137,19 @@
+ the
+ Data
+ Fiduciary
++processing
++such
++personal
++data
+ shall
+ ensure
+-the
++its
+ completeness,
+ accuracy
+ and
+-consistency
+-of
+-personal
+-data.
++consistency.
+ (4)
+-Where
+-personal
+-data
+-of
+-a
+-Data
+-Principal
+-is
+-likely
+-to
+-be
+-processed
+-for
+-any
+-purpose
+-not
+-related
+-to
+-sub-section
+-(3),
+-the
++A
+ Data
+ Fiduciary
+```
+
+### DPDPA-S9 (similarity 0.527)
+
+```
+--- 
++++ 
+@@ -29,7 +29,7 @@
+ has
+ a
+ lawful
+-guardian,
++guardian
+ obtain
+ verifiable
+ consent
+@@ -37,7 +37,7 @@
+ the
+ parent
+ of
+-the
++such
+ child
+ or
+ the
+@@ -55,8 +55,28 @@
+ may
+ be
+ prescribed.
++Explanation.—For
++the
++purpose
++of
++this
++sub-section,
++the
++expression
++“consent
++of
++the
++parent”
++includes
++the
++consent
++of
++lawful
++guardian,
++wherever
++applicable.
+ (2)
+-The
++A
+ Data
+ Fiduciary
+ shall
+@@ -82,7 +102,7 @@
+ a
+ child.
+ (3)
+-The
++A
+ Data
+ Fiduciary
+ shall
+@@ -110,7 +130,8 @@
+ (3)
+ shall
+ not
+-apply
++be
++applicable
+ to
+ processing
+ of
+@@ -121,7 +142,7 @@
+ child
+ by
+ such
+-class
++classes
+ of
+ Data
+ Fiduciaries
+@@ -142,75 +163,75 @@
+ The
+ Central
+ Government
+-may
++may,
++if
++satisfied
++that
++a
++Data
++Fiduciary
++has
++ensured
++that
++its
++processing
++of
++personal
++data
++of
++children
++is
++done
++in
++a
++manner
++that
++is
++verifiably
++safe,
+ notify
++for
++such
++processing
++by
++such
++Data
++Fiduciary
+ the
+ age
+ above
+```
+
+### DPDPA-S10 (similarity 0.490)
+
+```
+--- 
++++ 
+@@ -39,8 +39,7 @@
+ it
+ may
+ determine,
+-including
+-—
++including—
+ (a)
+ the
+ volume
+@@ -87,8 +86,7 @@
+ Significant
+ Data
+ Fiduciary
+-shall
+-—
++shall—
+ (a)
+ appoint
+ a
+@@ -96,7 +94,8 @@
+ Protection
+ Officer
+ who
+-shall
++shall—
++(i)
+ represent
+ the
+ Significant
+@@ -107,15 +106,16 @@
+ provisions
+ of
+ this
+-Act
+-and
++Act;
++(ii)
+ be
+ based
+ in
+-India,
+-who
+-shall
+-be
++India;
++(iii)
++be
++an
++individual
+ responsible
+ to
+ the
+@@ -130,9 +130,9 @@
+ the
+ Significant
+ Data
+-Fiduciary,
+-and
+-shall
++Fiduciary;
++and
++(iv)
+ be
+ the
+ point
+@@ -143,9 +143,7 @@
+ grievance
+ redressal
+ mechanism
+-referred
+-to
+-in
++under
+ the
+ provisions
+ of
+@@ -160,7 +158,6 @@
+ to
+ carry
+ out
+-the
+ data
+ audit,
+ who
+@@ -186,14 +183,62 @@
+ undertake
+ the
+ following
++other
+ measures,
+-namely
+-—
++namely:—
+ (i)
++periodic
+ Data
+ Protection
+ Impact
+-Assessment;
++Assessment,
++which
++shall
++be
++a
++process
++comprising
++a
++description
++of
++the
++rights
++of
++Data
++Principals
++and
++the
++purpose
+```
+
+### DPDPA-S11 (similarity 0.596)
+
+```
+--- 
++++ 
+@@ -28,23 +28,44 @@
+ has
+ previously
+ given
++consent,
++including
+ consent
+-to
+-the
++as
++referred
++to
++in
++clause
++(a)
++of
++section
++7
++(hereinafter
++referred
++to
++as
++the
++said
++Data
++Fiduciary),
++for
+ processing
+ of
+-her
+ personal
+ data,
+-subject
+-to
+-such
+-requirements
++upon
++making
++to
++it
++a
++request
++in
++such
++manner
+ as
+ may
+ be
+-prescribed
+-—
++prescribed,—
+ (a)
+ a
+ summary
+@@ -129,64 +150,65 @@
+ be
+ prescribed.
+ (2)
+-The
+-provisions
+-of
+-clauses
++Nothing
++contained
++in
++clause
+ (b)
+-and
++or
++clause
+ (c)
+ of
+ sub-section
+ (1)
+ shall
+-not
+ apply
+-if
++in
++respect
++of
+ the
+ sharing
+ of
+-personal
+-data
+-of
+-the
+-Data
+-Principal
+-by
+-the
+-Data
+-Fiduciary
+-to
+ any
+-other
+-Data
+-Fiduciary
++personal
++data
++by
++the
++said
++Data
++Fiduciary
++with
++any
++other
++Data
++Fiduciary
++authorised
++by
++law
++to
++obtain
++such
++personal
+```
+
+### DPDPA-S12 (similarity 0.381)
+
+```
+--- 
++++ 
+@@ -12,24 +12,7 @@
+ (1)
+ A
+ Data
+-Principal,
+-who
+-has
+-given
+-consent
+-to
+-the
+-processing
+-of
+-her
+-personal
+-data
+-under
+-the
+-provisions
+-of
+-this
+-Act,
++Principal
+ shall
+ have
+ the
+@@ -41,37 +24,46 @@
+ and
+ erasure
+ of
+-such
++her
+ personal
+ data
+-as
+-may
+-be
+-applicable,
+-in
+-accordance
+-with
+-the
+-requirements
+-and
+-in
+-the
+-manner
+-as
+-may
+-be
+-prescribed,
+ for
+ the
+ processing
+ of
+-such
+-personal
+-data
+-by
+-such
+-Data
+-Fiduciary.
++which
++she
++has
++previously
++given
++consent,
++including
++consent
++as
++referred
++to
++in
++clause
++(a)
++of
++section
++7,
++in
++accordance
++with
++any
++requirement
++or
++procedure
++under
++any
++law
++for
++the
++time
++being
++in
++force.
+ (2)
+ A
+ Data
+@@ -89,11 +81,7 @@
+ from
+ a
+ Data
+-Principal
+-under
+-sub-section
+-(1)
+-—
++Principal,—
+ (a)
+ correct
+ the
+@@ -117,53 +105,43 @@
+ (3)
+ A
+ Data
+-Fiduciary
+-shall,
+-upon
+```
+
+### DPDPA-S13 (similarity 0.834)
+
+```
+--- 
++++ 
+@@ -70,24 +70,24 @@
+ provisions
+ of
+ this
+-Act.
++Act
++and
++the
++rules
++made
++thereunder.
+ (2)
+ The
+ Data
+ Fiduciary
+ or
+ Consent
+-Manager,
+-as
+-the
+-case
+-may
+-be,
++Manager
+ shall
+ respond
+ to
+ any
+-grievance
++grievances
+ referred
+ to
+ in
+@@ -96,18 +96,26 @@
+ within
+ such
+ period
++as
++may
++be
++prescribed
+ from
+ the
+ date
+ of
+ its
+ receipt
+-as
+-may
+-be
+-prescribed.
++for
++all
++or
++any
++class
++of
++Data
++Fiduciaries.
+ (3)
+-A
++The
+ Data
+ Principal
+ shall
+@@ -115,11 +123,12 @@
+ the
+ opportunity
+ of
+-redressal
+-provided
++redressing
++her
++grievance
+ under
+-sub-section
+-(2)
++this
++section
+ before
+ approaching
+ the
+```
+
+### DPDPA-S14 (similarity 0.676)
+
+```
+--- 
++++ 
+@@ -62,9 +62,11 @@
+ the
+ purposes
+ of
+-sub-section
+-(1),
+-"incapacity"
++this
++section,
++the
++expression
++“incapacity”
+ means
+ inability
+ to
+@@ -76,8 +78,16 @@
+ Data
+ Principal
+ under
++the
++provisions
++of
+ this
+ Act
++or
++the
++rules
++made
++thereunder
+ due
+ to
+ unsoundness
+```
+
+### DPDPA-S15 (similarity 0.802)
+
+```
+--- 
++++ 
+@@ -5,11 +5,15 @@
+ of
+ Data
+ Principal**
+-Every
++A
+ Data
+ Principal
+ shall
+-—
++perform
++the
++following
++duties,
++namely:—
+ (a)
+ comply
+ with
+@@ -35,6 +39,7 @@
+ this
+ Act;
+ (b)
++to
+ ensure
+ not
+ to
+@@ -51,6 +56,7 @@
+ specified
+ purpose;
+ (c)
++to
+ ensure
+ not
+ to
+@@ -85,6 +91,7 @@
+ its
+ instrumentalities;
+ (d)
++to
+ ensure
+ not
+ to
+@@ -105,6 +112,7 @@
+ Board;
+ and
+ (e)
++to
+ furnish
+ only
+ such
+```
+
+### DPDPA-S19 (similarity 0.771)
+
+```
+--- 
++++ 
+@@ -7,9 +7,7 @@
+ for
+ appointment
+ of
+-Chairperson
+-and
+-Members**
++Chairperson**
+ (1)
+ The
+ Board
+@@ -23,7 +21,7 @@
+ number
+ of
+ other
+-Members,
++Members
+ as
+ the
+ Central
+@@ -36,9 +34,6 @@
+ and
+ other
+ Members
+-of
+-the
+-Board
+ shall
+ be
+ appointed
+@@ -59,9 +54,6 @@
+ and
+ other
+ Members
+-of
+-the
+-Board
+ shall
+ be
+ a
+@@ -72,23 +64,16 @@
+ and
+ standing
+ who
+-has
+-specialised
++possesses
++special
+ knowledge
+ or
+ practical
+ experience
+-of
+-not
+-less
+-than
+-the
+-prescribed
+-period,
+ in
+ the
+-areas
+-including
++fields
++of
+ data
+ governance,
+ administration
+@@ -98,7 +83,9 @@
+ laws
+ related
+ to
+-data
++social
++or
++consumer
+ protection,
+ dispute
+ resolution,
+@@ -116,7 +103,7 @@
+ in
+ any
+ other
+-field,
++field
+ which
+ in
+ the
+@@ -124,7 +111,7 @@
+ of
+ the
+ Central
+-Government,
++Government
+ may
+ be
+ useful
+@@ -135,9 +122,8 @@
+ at
+ least
+ one
+-of
+-these
+-members
++among
++them
+ shall
+ be
+ an
+```
+
+### DPDPA-S20 (similarity 0.640)
+
+```
+--- 
++++ 
+@@ -8,18 +8,11 @@
+ and
+ term
+ of
+-office
+-of
+-Chairperson
+-and
+-Members**
++office**
+ (1)
+ The
+-salary
+-and
++salary,
+ allowances
+-payable
+-to,
+ and
+ other
+ terms
+@@ -27,10 +20,11 @@
+ conditions
+ of
+ service
+-of,
++of
+ the
+ Chairperson
+ and
++other
+ Members
+ shall
+ be
+@@ -38,7 +32,7 @@
+ as
+ may
+ be
+-prescribed
++prescribed,
+ and
+ shall
+ not
+@@ -54,8 +48,8 @@
+ The
+ Chairperson
+ and
+-each
+-Member
++other
++Members
+ shall
+ hold
+ office
+@@ -65,16 +59,6 @@
+ of
+ two
+ years
+-from
+-the
+-date
+-on
+-which
+-he
+-enters
+-upon
+-his
+-office,
+ and
+ shall
+ be
+```
+
+### DPDPA-S21 (similarity 0.397)
+
+```
+--- 
++++ 
+@@ -7,11 +7,7 @@
+ and
+ continuation
+ as
+-Chairperson
+-and
+-Members
+-of
+-Board**
++Chairperson**
+ (1)
+ A
+ person
+@@ -20,19 +16,17 @@
+ disqualified
+ for
+ being
+-appointed,
+-or
+-for
+-continuing,
++appointed
++and
++continued
+ as
+ the
+ Chairperson
+ or
+ a
+-Member
+-where
+-he
+-—
++Member,
++if
++she—
+ (a)
+ has
+ been
+@@ -46,8 +40,15 @@
+ convicted
+ of
+ an
+-offence
++offence,
+ which
++in
++the
++opinion
++of
++the
++Central
++Government,
+ involves
+ moral
+ turpitude;
+@@ -61,9 +62,7 @@
+ of
+ acting
+ as
+-such
+-Chairperson
+-or
++a
+ Member;
+ (d)
+ has
+@@ -72,19 +71,16 @@
+ financial
+ or
+ other
+-interest
++interest,
+ as
+ is
+ likely
+ to
+ affect
+ prejudicially
+-his
++her
+ functions
+ as
+-such
+-Chairperson
+-or
+ a
+ Member;
+ or
+@@ -92,12 +88,12 @@
+ has
+ so
+ abused
+-his
++her
+ position
+ as
+ to
+ render
+-his
++her
+ continuance
+ in
+ office
+@@ -107,21 +103,23 @@
+ public
+ interest.
+ (2)
+-No
+-person
+-referred
+-to
+-in
+-sub-section
+-(1)
++The
++Chairperson
++or
+```
+
+### DPDPA-S22 (similarity 0.293)
+
+```
+--- 
++++ 
+@@ -13,38 +13,47 @@
+ Chairperson
+ or
+ any
++other
+ Member
+-may,
+-by
++may
++give
+ notice
+ in
+ writing
+-under
+-his
+-hand
+-addressed
+ to
+ the
+ Central
+-Government,
+-resign
+-his
+-office:
+-Provided
+-that
++Government
++of
++resigning
++from
++her
++office,
++and
++such
++resignation
++shall
++be
++effective
++from
+ the
+-Chairperson
++date
++on
++which
++the
++Central
++Government
++permits
++her
++to
++relinquish
++office,
+ or
+-the
+-Member
+-shall
+-continue
+-to
+-hold
+-office
+-until
+-the
++upon
+ expiry
++of
++a
++period
+ of
+ three
+ months
+@@ -55,32 +64,26 @@
+ receipt
+ of
+ such
+-notice
+-by
+-the
+-Central
+-Government
++notice,
+ or
+-until
++upon
+ a
+-person
+ duly
+ appointed
+-as
+-his
+ successor
+-enters
++entering
+ upon
+-his
+-office
++her
++office,
+ or
+-until
++upon
+ the
+ expiry
+ of
+-his
++the
+ term
+ of
++her
+ office,
+ whichever
+ is
+@@ -90,30 +93,41 @@
+ vacancy
+ caused
+ by
++the
+ resignation
+ or
+```
+
+### DPDPA-S23 (similarity 0.254)
+
+```
+--- 
++++ 
+@@ -8,14 +8,6 @@
+ The
+ Board
+ shall
+-meet
+-at
+-such
+-times
+-and
+-places,
+-and
+-shall
+ observe
+ such
+ procedure
+@@ -23,6 +15,9 @@
+ regard
+ to
+ the
++holding
++of
++and
+ transaction
+ of
+ business
+@@ -33,38 +28,20 @@
+ by
+ digital
+ means,
++and
++authenticate
++its
++orders,
++directions
++and
++instruments
++in
++such
++manner
+ as
+ may
+ be
+-prescribed,
+-and
+-the
+-orders
+-and
+-directions
+-of
+-the
+-Board
+-shall
+-be
+-authenticated
+-by
+-the
+-signature
+-of
+-the
+-Chairperson
+-or
+-any
+-other
+-officer
+-of
+-the
+-Board
+-authorised
+-by
+-the
+-Chairperson.
++prescribed.
+ (2)
+ No
+ act
+@@ -79,22 +56,20 @@
+ merely
+ by
+ reason
+-of
+-—
++of—
+ (a)
+ any
+ vacancy
+-in,
++in
+ or
+ any
+ defect
+ in
+ the
+ constitution
+-of,
++of
+ the
+ Board;
+-or
+ (b)
+ any
+ defect
+@@ -109,8 +84,7 @@
+ the
+ Chairperson
+ or
+-as
+-a
++other
+ Member
+ of
+ the
+@@ -124,51 +98,51 @@
+ procedure
+ of
+ the
+-Board
++Board,
++which
+```
+
+### DPDPA-S24 (similarity 0.642)
+
+```
+--- 
++++ 
+@@ -10,7 +10,6 @@
+ Board
+ may,
+ with
+-the
+ previous
+ approval
+ of
+@@ -25,7 +24,7 @@
+ as
+ it
+ may
+-consider
++deem
+ necessary
+ for
+ the
+@@ -35,33 +34,20 @@
+ its
+ functions
+ under
++the
++provisions
++of
+ this
+ Act,
+-and
+-the
+-salaries
+-and
+-allowances
+-payable
+-to,
+-and
+-other
++on
++such
+ terms
+ and
+ conditions
+ of
++appointment
++and
+ service
+-of,
+-the
+-officers
+-and
+-employees
+-of
+-the
+-Board
+-shall
+-be
+-such
+ as
+ may
+ be
+```
+
+### DPDPA-S27.1a_c_e_2_3 (similarity 0.317)
+
+```
+--- 
++++ 
+@@ -9,16 +9,23 @@
+ (1)
+ The
+ Board
+-shall,
++shall
++exercise
++and
++perform
++the
++following
++powers
++and
++functions,
++namely:—
++(a)
+ on
+ receipt
+ of
+-—
+-(a)
+ an
+ intimation
+-regarding
+-a
++of
+ personal
+ data
+ breach
+@@ -28,6 +35,7 @@
+ of
+ section
+ 8,
++to
+ direct
+ any
+ urgent
+@@ -43,6 +51,8 @@
+ personal
+ data
+ breach,
++and
++to
+ inquire
+ into
+ such
+@@ -58,6 +68,7 @@
+ this
+ Act;
+ (b)
++on
+ a
+ complaint
+ made
+@@ -69,33 +80,46 @@
+ respect
+ of
+ a
+-breach
++personal
++data
++breach
++or
++a
++breach
++in
++observance
++by
++a
++Data
++Fiduciary
++of
++its
++obligations
+ in
+ relation
+ to
+ her
+ personal
+-data,
+-or
++data
++or
++the
++exercise
++of
++her
++rights
++under
+ the
+ provisions
+ of
+ this
+ Act,
+-that
+-is
+-likely
+-to
+-affect
+-the
+-rights
+-of
+-Data
+-Principals,
+-or
++or
++on
+ a
+ reference
+ made
++to
++it
+ by
+ the
+ Central
+@@ -112,26 +136,8 @@
+ directions
+ of
+```
+
+### DPDPA-S27.1d (similarity 0.508)
+
+```
+--- 
++++ 
+@@ -1,14 +1,26 @@
+ **Section
+ 27(1)(d)
+ —
+-Board's
+-power
+-over
+-Consent
+-Manager
+-registration
+-breaches**
+-On
++Powers
++and
++functions
++of
++Board**
++(1)
++The
++Board
++shall
++exercise
++and
++perform
++the
++following
++powers
++and
++functions,
++namely:—
++(d)
++on
+ receipt
+ of
+ an
+@@ -20,17 +32,11 @@
+ condition
+ of
+ registration
+-referred
++of
++a
++Consent
++Manager,
+ to
+-in
+-sub-section
+-(9)
+-of
+-section
+-6,
+-the
+-Board
+-shall
+ inquire
+ into
+ such
+@@ -42,4 +48,5 @@
+ provided
+ in
+ this
+-Act.
++Act;
++and
+```
+
+### DPDPA-S29 (similarity 0.667)
+
+```
+--- 
++++ 
+@@ -32,7 +32,6 @@
+ (2)
+ Every
+ appeal
+-made
+ under
+ sub-section
+ (1)
+@@ -56,13 +55,18 @@
+ or
+ direction
+ appealed
+-against,
++against
++and
++it
++shall
++be
+ in
+ such
+ form
+ and
+ manner
+ and
++shall
+ be
+ accompanied
+ by
+@@ -85,11 +89,11 @@
+ expiry
+ of
+ the
+-said
+ period
+-of
+-sixty
+-days
++specified
++in
++sub-section
++(2),
+ if
+ it
+ is
+@@ -101,23 +105,32 @@
+ cause
+ for
+ not
+-filing
+-it
++preferring
++the
++appeal
+ within
+ that
+ period.
+ (4)
+-The
+-Appellate
+-Tribunal
+-shall,
++On
++receipt
++of
++an
++appeal
++under
++sub-section
++(1),
++the
++Appellate
++Tribunal
++may,
+ after
+ giving
+ the
+ parties
+ to
+ the
+-appeal
++appeal,
+ an
+ opportunity
+ of
+@@ -138,8 +151,6 @@
+ aside
+ the
+ order
+-or
+-direction
+ appealed
+ against.
+ (5)
+@@ -160,6 +171,7 @@
+ the
+ Board
+ and
++to
+ the
+ parties
+ to
+@@ -198,18 +210,28 @@
+ of
+ the
+ appeal
++finally
+ within
+ six
+ months
+ from
+ the
+ date
+-of
+-filing.
++on
++which
++the
++appeal
+```
+
+### DPDPA-S32 (similarity 0.293)
+
+```
+--- 
++++ 
+@@ -24,41 +24,26 @@
+ provisions
+ of
+ this
+-Act,
++Act
+ from
+ any
+-person,
++person
+ at
+ any
+ stage
+ of
+ a
+ proceeding
+-initiated
+ under
+ section
+-28
++28.
++(2)
++The
++voluntary
++undertaking
++referred
++to
+ in
+-respect
+-of
+-any
+-matter
+-related
+-to
+-observance
+-of
+-the
+-provisions
+-of
+-this
+-Act
+-by
+-such
+-person.
+-(2)
+-An
+-undertaking
+-under
+ sub-section
+ (1)
+ may
+@@ -68,10 +53,10 @@
+ to
+ take
+ such
+-action,
++action
+ within
+ such
+-time,
++time
+ as
+ may
+ be
+@@ -85,158 +70,116 @@
+ taking
+ such
+ action,
++and
+ or
+-to
+-make
+-good
+-the
+-loss
+-caused
+-to
+-any
+-Data
+-Principal
+-in
+-the
+-manner
+-as
+-agreed
+-between
+-the
+-person
+-and
+-the
+-Board,
+-or
+-to
+-publicise
++publicising
+ such
+ undertaking.
+ (3)
+ The
+-terms
++Board
++may,
++after
++accepting
++the
++voluntary
++undertaking
+ and
+-conditions
+-of
++with
+ the
+-undertaking
+-may,
+-on
+-the
+-request
++consent
+```
+
+### DPDPA-S33 (similarity 0.126)
+
+```
+--- 
++++ 
+@@ -3,20 +3,17 @@
+ —
+ Penalties**
+ (1)
+-On
+-being
+-satisfied,
+-after
+-conducting
++If
++the
++Board
++determines
++on
++conclusion
++of
+ an
+-inquiry,
++inquiry
+ that
+-non-compliance
+-by
+-a
+-person
+-with
+-any
++breach
+ of
+ the
+ provisions
+@@ -28,57 +25,56 @@
+ rules
+ made
+ thereunder
++by
++a
++person
+ is
+ significant,
+-the
+-Board
++it
+ may,
+ after
+ giving
+ the
+ person
+-a
+-reasonable
++an
+ opportunity
+ of
+ being
+ heard,
+-by
+-order,
+ impose
+ such
+-financial
++monetary
+ penalty
+ specified
+ in
+ the
+-Schedule
+-as
+-it
+-may
+-think
+-fit.
++Schedule.
+ (2)
+-The
++While
++determining
++the
++amount
++of
++monetary
++penalty
++to
++be
++imposed
++under
++sub-section
++(1),
++the
+ Board
+-shall,
+-before
+-imposing
+-any
+-financial
+-penalty
+-under
+-this
+-section,
++shall
+ have
+ regard
+ to
+ the
+ following
+ matters,
+-namely:
+-—
++namely:—
+ (a)
++the
+ nature,
+ gravity
+ and
+@@ -87,6 +83,7 @@
+ the
+ breach;
+ (b)
++the
+ type
+```
+
+### DPDPA-S36 (similarity 0.840)
+
+```
+--- 
++++ 
+@@ -18,19 +18,13 @@
+ Act,
+ require
+ the
+-Board,
++Board
++and
++any
++Data
++Fiduciary
+ or
+-a
+-Data
+-Fiduciary,
+-or
+-an
+-intermediary,
+-as
+-the
+-case
+-may
+-be,
++intermediary
+ to
+ furnish
+ such
+```
+
+### DPDPA-S37 (similarity 0.298)
+
+```
+--- 
++++ 
+@@ -12,8 +12,117 @@
+ The
+ Central
+ Government
++or
++any
++of
++its
++officers
++specially
++authorised
++by
++it
++in
++this
++behalf
+ may,
+-if
++upon
++receipt
++of
++a
++reference
++in
++writing
++from
++the
++Board
++that—
++(a)
++intimates
++the
++imposition
++of
++monetary
++penalty
++by
++the
++Board
++on
++a
++Data
++Fiduciary
++in
++two
++or
++more
++instances;
++and
++(b)
++advises,
++in
++the
++interests
++of
++the
++general
++public,
++the
++blocking
++for
++access
++by
++the
++public
++to
++any
++information
++generated,
++transmitted,
++received,
++stored
++or
++hosted,
++in
++any
++computer
++resource
++that
++enables
++such
++Data
++Fiduciary
++to
++carry
++on
++any
++activity
++relating
++to
++offering
++of
++goods
++or
++services
++to
++Data
++Principals
++within
++the
++territory
++of
++India,
++after
++giving
++an
++opportunity
++of
++being
++heard
++to
++that
++Data
++Fiduciary,
++on
++being
+ satisfied
+ that
+```
+
+### DPDPA-S39 (similarity 0.496)
+
+```
+--- 
++++ 
+@@ -9,6 +9,7 @@
+ court
+ shall
+ have
++the
+ jurisdiction
+ to
+ entertain
+@@ -21,23 +22,18 @@
+ of
+ any
+ matter
++for
+ which
+ the
+ Board
+-or
+-the
+-Appellate
+-Tribunal
+ is
+ empowered
+-to
+-determine
+ under
+ the
+ provisions
+ of
+ this
+-Act,
++Act
+ and
+ no
+ injunction
+@@ -65,9 +61,9 @@
+ of
+ any
+ power
+-conferred
+-by
+-or
+ under
++the
++provisions
++of
+ this
+ Act.
+```
+
+### DPDPA-S40 (similarity 0.556)
+
+```
+--- 
++++ 
+@@ -11,7 +11,7 @@
+ Government
+ may,
+ by
+-notification
++notification,
+ and
+ subject
+ to
+@@ -21,7 +21,7 @@
+ previous
+ publication,
+ make
+-rules,
++rules
+ not
+ inconsistent
+ with
+@@ -30,7 +30,6 @@
+ of
+ this
+ Act,
+-generally
+ to
+ carry
+ out
+@@ -41,7 +40,7 @@
+ Act.
+ (2)
+ In
+-particular,
++particular
+ and
+ without
+ prejudice
+@@ -64,19 +63,29 @@
+ the
+ following
+ matters,
+-namely:
+-—
++namely:—
+ (a)
+ the
+ manner
+-of
+-giving
++in
++which
++the
+ notice
+-under
+-sub-sections
+-(1)
+-and
+-(2)
++given
++by
++the
++Data
++Fiduciary
++to
++a
++Data
++Principal
++shall
++inform
++her,
++under
++sub-section
++(1)
+ of
+ section
+ 5;
+@@ -86,52 +95,63 @@
+ in
+ which
+ the
++notice
++given
++by
++the
++Data
++Fiduciary
++to
++a
++Data
++Principal
++shall
++inform
++her,
++under
++sub-section
++(2)
++of
++section
++5;
++(c)
++the
++manner
++of
++accountability
++and
++the
++obligations
++of
+ Consent
+ Manager
+-shall
+-be
+-accountable
+-to
+-the
+-Data
+-Principal,
+-and
+-its
+-other
+```
+
+### DPDPA-S43 (similarity 0.707)
+
+```
+--- 
++++ 
+@@ -32,7 +32,7 @@
+ Gazette,
+ make
+ such
+-provisions,
++provisions
+ not
+ inconsistent
+ with
+@@ -40,31 +40,36 @@
+ provisions
+ of
+ this
+-Act,
++Act
+ as
+ may
+ appear
+ to
++it
++to
+ be
+ necessary
++or
++expedient
+ for
+ removing
+ the
+-difficulty:
+-Provided
+-that
+-no
+-such
++difficulty.
++(2)
++No
+ order
++as
++referred
++to
++in
++sub-section
++(1)
+ shall
+ be
+ made
+ after
+ the
+ expiry
+-of
+-a
+-period
+ of
+ three
+ years
+@@ -76,7 +81,7 @@
+ of
+ this
+ Act.
+-(2)
++(3)
+ Every
+ order
+ made
+```
+
+### DPDPA-S44.2 (similarity 0.805)
+
+```
+--- 
++++ 
+@@ -3,11 +3,9 @@
+ —
+ Amendments
+ to
+-the
+-Information
+-Technology
+-Act,
+-2000**
++certain
++Acts**
++(2)
+ The
+ Information
+ Technology
+@@ -20,8 +18,7 @@
+ the
+ following
+ manner,
+-namely
+-—
++namely:—
+ (a)
+ section
+ 43A
+@@ -40,22 +37,22 @@
+ words
+ and
+ figures
+-"the
++“the
+ Patents
+ Act,
+-1970",
++1970”,
+ the
+ words
+ and
+ figures
+-"or
++“or
+ the
+ Digital
+ Personal
+ Data
+ Protection
+ Act,
+-2023"
++2023”
+ shall
+ be
+ inserted;
+```
+
+### DPDPA-SCHED (similarity 0.806)
+
+```
+--- 
++++ 
+@@ -1,21 +1,29 @@
+-**Schedule**
+-*(see
+-sub-section
+-(1)
+-of
+-section
+-33)*
+-|
+-Nature
+-of
+-breach
++**THE
++SCHEDULE**
++*[See
++section
++33
++(1)]*
++|
++Sl.
++No.
++|
++Breach
++of
++provisions
++of
++this
++Act
++or
++rules
++made
++thereunder
+ |
+ Penalty
+-(may
+-extend
+-to)
+-|
+-|---|---|
++|
++|---|---|---|
++|
++1.
+ |
+ Breach
+ in
+@@ -42,7 +50,10 @@
+ section
+ 8.
+ |
+-Two
++May
++extend
++to
++two
+ hundred
+ and
+ fifty
+@@ -50,20 +61,22 @@
+ rupees.
+ |
+ |
+-Breach
+-in
+-observance
+-of
++2.
++|
++Breach
++in
++observing
+ the
+ obligation
+ to
+-notify
++give
+ the
+ Board
+-and
++or
+ affected
+ Data
+-Principals
++Principal
++notice
+ of
+ a
+ personal
+@@ -76,11 +89,16 @@
+ section
+ 8.
+ |
+-Two
+-hundred
+-crore
+-rupees.
+-|
++May
++extend
++to
++two
++hundred
++crore
++rupees.
++|
++|
++3.
+ |
+ Breach
+ in
+@@ -96,11 +114,16 @@
+ section
+ 9.
+ |
+-Two
+-hundred
+-crore
+-rupees.
+```
+
+## C2 exceptions (sentence only matched pypdf text after removing known header/margin noise)
+
+- **DPDPA-S8**: '(a) erase personal data, upon the Data Principal withdrawing her consent or as soon as it is reasonable to assume that the specified purpose is no longer being '
+- **DPDPA-S11**: '(2) Nothing contained in clause (b) or clause (c) of sub-section (1) shall apply in respect of the sharing of any personal data by the said Data Fiduciary with '
+- **DPDPA-S33**: '(1) If the Board determines on conclusion of an inquiry that breach of the provisions of this Act or the rules made thereunder by a person is significant, it ma'
+
+## Items for Gautam's review
+
+- **C2 exceptions**: listed above -- sentences that only matched the second extractor's text after stripping a known page-header or side-margin string. Expected/benign given pypdf mixes margin notes into the text stream.
+- **Split-row endings**: `DPDPA-S27.1d` keeps the Act's own "; and" ending verbatim rather than dropping it (per instruction, pending your call).
+  - Current DPDPA-S27.1d ending: `...' such breach and impose penalty as provided in this Act; and'`
+- **Summaries that may now read oddly against the verbatim text**: not checked here -- Phase 4c handles only the 5 pre-approved summary fixes; anything else is explicitly out of scope for this script (list, don't touch).
