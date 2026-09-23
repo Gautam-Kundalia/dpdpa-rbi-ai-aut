@@ -15,27 +15,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import db as db_module
 import seed_dpdp_act_full as seed_act
+import seed_dpdp_rules_full as seed_rules
 
 LIVE_DB_PATH = Path(__file__).resolve().parent.parent / "db" / "dpdpa.db"
 
 
-def test_seeding_act_reproduces_committed_full_text(tmp_path):
-    scratch_path = tmp_path / "seed_act_test.db"
-    seed_act.main(db_path=scratch_path)
-
+def _assert_reproduces(scratch_path, prefix):
     scratch_conn = db_module.get_connection(scratch_path)
     live_conn = db_module.get_connection(LIVE_DB_PATH)  # read-only use
 
     scratch_rows = {
         r["provision_id"]: r["full_text"]
         for r in scratch_conn.execute(
-            "SELECT provision_id, full_text FROM provisions WHERE provision_id LIKE 'DPDPA-%'"
+            "SELECT provision_id, full_text FROM provisions WHERE provision_id LIKE ?", (f"{prefix}%",)
         )
     }
     live_rows = {
         r["provision_id"]: r["full_text"]
         for r in live_conn.execute(
-            "SELECT provision_id, full_text FROM provisions WHERE provision_id LIKE 'DPDPA-%'"
+            "SELECT provision_id, full_text FROM provisions WHERE provision_id LIKE ?", (f"{prefix}%",)
         )
     }
     scratch_conn.close()
@@ -47,3 +45,15 @@ def test_seeding_act_reproduces_committed_full_text(tmp_path):
     )
     mismatches = [pid for pid in scratch_rows if scratch_rows[pid] != live_rows[pid]]
     assert mismatches == [], f"full_text mismatch for: {mismatches}"
+
+
+def test_seeding_act_reproduces_committed_full_text(tmp_path):
+    scratch_path = tmp_path / "seed_act_test.db"
+    seed_act.main(db_path=scratch_path)
+    _assert_reproduces(scratch_path, "DPDPA-")
+
+
+def test_seeding_rules_reproduces_committed_full_text(tmp_path):
+    scratch_path = tmp_path / "seed_rules_test.db"
+    seed_rules.main(db_path=scratch_path)
+    _assert_reproduces(scratch_path, "DPDPR-")

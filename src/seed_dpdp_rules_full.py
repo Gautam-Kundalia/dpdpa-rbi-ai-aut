@@ -6,10 +6,23 @@ G.S.R. 846(E), dated 13 November 2025, Ministry of Electronics and
 Information Technology. Fetched directly from the official PDF:
 https://www.meity.gov.in/static/uploads/2025/11/53450e6e5dc0bfa85ebd78686cadad39.pdf
 
-All full_text below is verbatim English clause text from that Gazette PDF —
-no paraphrasing or abridging. full_text uses a light markdown convention
-(**bold** for emphasis, blank-line-separated paragraphs, '|'-delimited
-tables) that src/export_word.py renders into proper Word formatting.
+The full_text field inside each PROVISIONS tuple below is now VESTIGIAL —
+kept in place for readability/diff history, but not actually used at seed
+time. It predates the 23 Sep 2026 audit fixes (Phase 4a's G.S.R. 892(E)
+corrigendum, Phase 4b's Schedule restoration), which were applied as
+one-off corrections directly to db/dpdpa.db rather than by retyping this
+file (this project's own ground rule: legal text is only ever extracted
+by code from an official PDF, never hand-typed). main() instead loads
+full_text from data/rules_verbatim_2026-09-23.json — a code-generated
+dump of the database's own, already-verified text (see
+tests/test_legal_text_verbatim.py) — the same pattern
+seed_dpdp_act_full.py uses for the Act table. If this file's own
+full_text strings and the JSON ever disagree, the JSON wins; treat the
+tuples' full_text as historical reference only.
+
+full_text uses a light markdown convention (**bold** for emphasis,
+blank-line-separated paragraphs, '|'-delimited tables) that
+src/export_word.py renders into proper Word formatting.
 
 Usage:
     python src/init_db.py                 # schema only, if not already done
@@ -19,9 +32,19 @@ Usage:
 """
 from __future__ import annotations
 
+import json
 import re
 
 from db import PROJECT_ROOT, get_connection, init_schema
+
+VERBATIM_JSON_PATH = PROJECT_ROOT / "data" / "rules_verbatim_2026-09-23.json"
+
+
+def load_verbatim_full_text() -> dict[str, str]:
+    """provision_id -> full_text, code-dumped from the database's own
+    already-verified text (see VERBATIM_JSON_PATH's own 'meta' key)."""
+    data = json.loads(VERBATIM_JSON_PATH.read_text(encoding="utf-8"))
+    return {pid: entry["full_text"] for pid, entry in data["provisions"].items()}
 
 SOURCE_DOC = "DPDP Rules, 2025 — Gazette Notification G.S.R. 846(E), 13 Nov 2025"
 SOURCE_URL = "https://www.meity.gov.in/static/uploads/2025/11/53450e6e5dc0bfa85ebd78686cadad39.pdf"
@@ -889,17 +912,23 @@ def build_change_row(change_id, pid, summary, full_text, eff_note):
     }
 
 
-def main():
-    DB_PATH = PROJECT_ROOT / "db" / "dpdpa.db"
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = get_connection()
+def main(db_path=None):
+    """db_path: optional override, for tests — seeds a scratch database
+    instead of the real db/dpdpa.db. Defaults to the real one."""
+    if db_path is None:
+        db_path = PROJECT_ROOT / "db" / "dpdpa.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = get_connection(db_path)
     init_schema(conn)
+
+    verbatim_full_text = load_verbatim_full_text()
 
     prov_cols = None
     change_cols = None
     n = 0
 
-    for i, (pid, ref, topic, summary, eff_group, full_text) in enumerate(PROVISIONS, start=2):
+    for i, (pid, ref, topic, summary, eff_group, _tuple_full_text) in enumerate(PROVISIONS, start=2):
+        full_text = verbatim_full_text[pid]
         prov_row, change_id, eff_note = build_provision_row(pid, ref, topic, summary, eff_group, full_text, i)
         change_row = build_change_row(change_id, pid, summary, full_text, eff_note)
 
