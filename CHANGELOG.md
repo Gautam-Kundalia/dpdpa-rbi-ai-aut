@@ -308,3 +308,192 @@ Nothing in `src/`, `db/`, `docs/*.docx` or `data/` was modified. Headlines:
   only real regulatory changes and only the changed words (docx, Excel, email);
   G.S.R. 892(E) corrigendum treated as a regulatory change; rebuild all 48 Act
   rows verbatim from the official PDF; merge to `main` after all tests pass.
+
+## 2026-09-23 — Applied all 9 phases of the audit fixes
+
+This is the big one: every fix from the 23 Sep audit report, applied,
+tested, and (once the remaining GitHub-side steps below are done)
+released to production. In plain words, the two client-facing documents
+and the daily automated check are now materially more trustworthy than
+they were this morning — the Act text is verbatim instead of paraphrased,
+a real government change is now told apart from us fixing our own
+mistakes, and the pipeline can no longer lose a change silently.
+
+### What changed, and why
+
+- **Word/Excel/email now distinguish "the government changed the law"
+  from "we fixed our own data".** A new `change_log.change_origin` column
+  (`regulatory` / `data_correction` / `baseline`) drives this. Only a
+  `regulatory` change is ever highlighted, and only the specific words
+  that changed — not the whole clause — with a caption naming the source
+  and date. This is what stopped the Word document from showing 7
+  sections as "amended by the government" when we'd actually just
+  corrected our own typos.
+- **All 48 Act rows rebuilt word-for-word from the official PDF.** 46 of
+  48 changed. The database held paraphrases before — some seriously
+  wrong (a made-up "Companies Act" reference in s.22, a wrong TRAI Act
+  citation in s.29, a fabricated IT-Act cross-reference in s.37, 24
+  missing rule-making items in s.40). Every word now comes from the PDF
+  through a script — never typed by hand — and passed six separate
+  mechanical checks before being written. Full row-by-row detail:
+  `docs/act_verbatim_rebuild_2026-09-23.md`.
+- **The G.S.R. 892(E) corrigendum applied.** The government's own 10 Dec
+  2025 correction notice — Rule 1(3)/(4)'s "of this Gazette" is now "in
+  the Official Gazette", Rule 13(5)'s "Department" is now "Departments",
+  Rule 23(1)'s cut-off sentence now correctly ends "...given in such
+  order." This is a real regulatory change (the government issued it), so
+  it's highlighted — the only 3 rows that are, right now.
+- **Missing Rules Schedule text restored.** The First Schedule's
+  consent-routing illustration and closing definitions, the Fourth
+  Schedule's definitions note (relettered to match the corrigendum's
+  fix for a printing defect in the original Gazette), the Third
+  Schedule's two paraphrased rows replaced with the government's actual
+  wording, and one dropped phrase in the Fifth Schedule. None of this is
+  the government changing anything — it's us finishing work that was
+  left incomplete at seeding — so it's recorded as a data correction,
+  never highlighted.
+- **3 of 5 pre-approved summary fixes applied** (commencement timing on
+  two Act provisions, Rule 12's scope). The other 2 had already been
+  rewritten differently since the audit was written — the script
+  correctly refused to guess and left them alone; see "Open questions"
+  below.
+- **The pipeline can no longer lose a change silently.** A download
+  failure now keeps the last good fingerprint instead of blanking it, and
+  is reported instead of swallowed. A classification failure now rolls
+  the fingerprint back so tomorrow's run retries instead of giving up
+  forever. `pypdf` (which extracts text slightly differently between
+  versions, enough to change a fingerprint) is now pinned to a tested
+  version instead of auto-upgrading.
+- **Classification redesigned to compare text first.** This is what was
+  actually breaking the Act PDF check every single day: the AI was being
+  shown the entire document on every run, which was both too large (it
+  was hitting its reply-length limit before finishing) and stale (a
+  60,000-character cutoff meant Sections 43, 44, and the Schedule were
+  never even sent, and the Rules document's cutoff meant the AI saw
+  almost nothing but Hindi). Now the pipeline compares the new fetch
+  against what it saw last time, in plain Python, and only sends the AI
+  the parts that actually changed. First-ever check of a source now
+  correctly reports "baseline captured" and makes no AI call at all,
+  rather than trying to classify the whole document as if it were new.
+- **PIB source switched to its official RSS feed**, explicitly requesting
+  English — the previous page could silently serve Hindi depending on the
+  requesting server's apparent location, with no way to check from
+  outside what GitHub's server would actually see.
+- **A permanent automated test suite** (64 tests) now guards against all
+  of the above regressing — including two tests that literally re-run
+  the verbatim-text checks against the official PDFs on every test-suite
+  run, so paraphrase can't quietly creep back in.
+- **Documentation brought up to date**: `README.md` no longer describes
+  OpenRouter (production has used Claude Haiku 4.5 since Sept 22); the
+  daily check's schedule moved off the busy top-of-hour mark, where
+  GitHub's own queue tends to delay it by hours; stale duplicate copies
+  of the Act text that predated this fix were deleted so nothing
+  still points at the old, wrong wording.
+
+### Test results
+
+- **64 automated tests, all passing** (`pytest tests/`): pipeline-failure
+  handling, the diff-first classification design, highlighting
+  correctness (including the exact G.S.R. 892(E) wording), and — the two
+  permanent guards — every Act and Rules row checked verbatim against the
+  official PDFs, and seeding a fresh database reproducing the committed
+  text exactly.
+- **A real, live run of the pipeline, twice**: real network fetches, real
+  database writes, two real emails sent. First run correctly reported
+  "baseline captured" for 3 sources with no AI calls; second run
+  correctly reported no changes, also no AI calls. **Please confirm both
+  emails arrived.**
+- Documents regenerated and inspected by script: the Act Word document
+  shows 0 highlights; the Rules Word document highlights exactly the 4
+  corrigendum words and nothing else; the Excel Change_Log sheet has
+  exactly 3 yellow rows.
+
+### API cost
+
+**Roughly $0.03 of the $1.50 budget spent, all Anthropic (Claude Haiku
+4.5 / Sonnet 5) API calls:**
+
+- ~$0.03: one diagnostic call re-running the exact production Act-PDF
+  prompt with eager streaming, to settle the "was the model writing a lot
+  or writing nothing" question from the earlier CHANGELOG entries.
+  Result: the model completed normally this time (`stop_reason:
+  tool_use`, 33 output tokens, empty change list) rather than hitting
+  `max_tokens` — a different outcome from the earlier failures, most
+  likely because the diff-first redesign means this failure mode can no
+  longer occur in production regardless. Doesn't change anything that
+  needs doing; recorded for the historical record.
+- $0: both real end-to-end pipeline runs — the diff-first design means a
+  source with no prior snapshot needs no AI call at all ("baseline
+  captured"), and neither run found anything to actually classify.
+- $0: everything else — all extraction, rebuilding, and verification work
+  (Phases 3, 4a, 4b, 4c, and the whole test suite) is plain Python
+  against PDF files, no LLM involved, per the ground rule that legal text
+  only ever comes from a PDF through code, never from a model.
+
+### Rows left at "Pending Review"
+
+56 new rows this session (plus 7 pre-existing ones from before this
+session, `CHG-0033`–`CHG-0039`, untouched): 46 from the Act rebuild, 4
+from the Rules Schedule restoration, 3 from the G.S.R. 892(E) corrigendum,
+3 from the summary fixes. `review_status = 'Pending Review'` on all of
+them is intentional — per the project's no-human-review-gate design, this
+doesn't block anything from being live and correct, but no human has yet
+read the corrected text line-by-line. Recommended reading, in order of
+how much changed: `docs/act_verbatim_rebuild_2026-09-23.md` (word-level
+diffs for the biggest changes among the 46 Act rows), then the 7 rows
+below.
+
+### Open questions for EY legal (nobody has fixed or guessed at these — flagging only)
+
+- **Rule 13(5)** names the "Ministry of Electronics and **Technology**"
+  — missing "Information". Printed that way in the official Gazette and
+  not touched by the corrigendum; kept verbatim.
+- **Rule 14(3)** reads "...shall prominently publish...within a
+  reasonable period...under its grievance redressal system..." with no
+  stated object — publish *what*? Also printed that way in the official
+  Gazette; kept verbatim.
+- **13 vs 14 November 2026/2027** for the one-year/eighteen-month
+  commencement dates: both source Gazette issues are dated "13th
+  November" on their face, but the e-Gazette upload ID and digital
+  signature timestamp say the 14th. The audit recommends treating 13 Nov
+  as authoritative (the Act's own citation convention, 11 Aug 2023,
+  follows the same face-date-vs-signature pattern) — this is a
+  day-counting legal question, not a data error, and needs your read.
+- **`DPDPA-S27.1d`** keeps the Act's own "; and" sentence ending verbatim
+  rather than dropping it, per instruction pending your call:
+  `"...impose penalty as provided in this Act; and"`.
+- **Two small, newly-found transcription gaps**, both confirmed against
+  the official PDF with two independent extraction tools (not extraction
+  ambiguity, genuinely different from the database): `DPDPR-R10`(2)(c)
+  ends with a period in the database where the Gazette has a semicolon;
+  `DPDPR-SCH1` Part B item 4's lead-in is missing a colon ("The Consent
+  Manager —" vs. the Gazette's "The Consent Manager: —"). Both are minor
+  and outside every phase's stated scope this session, so left alone
+  rather than fixed without the same verification rigor as everything
+  else — your call whether they're worth a follow-up.
+- **3 C2 cross-check exceptions** in the Act rebuild (`DPDPA-S8`,
+  `DPDPA-S11`, `DPDPA-S33`) — sentences that only matched the second PDF
+  tool's text after removing a known page-header/margin-note string.
+  Expected and benign (pypdf mixes those into its text stream), listed in
+  `docs/act_verbatim_rebuild_2026-09-23.md` for transparency.
+
+### The MeitY timeline-compression proposal
+
+Checked again today: MeitY held stakeholder consultations on 23 Jan 2026
+proposing to cut the 18-month compliance timeline to 12 months for
+Significant Data Fiduciaries (last date for compliance moving from 13 May
+2027 to 13 Nov 2026), with industry feedback sought by 4 Feb 2026. As of
+today, no formally notified amendment to the Rules has been found — this
+remains a proposal under discussion, not a notified change. Worth
+watching, and Phase 7's source-monitoring gap (no reachable feed for new
+MeitY notifications) means this pipeline would not automatically catch it
+if and when it is notified — see `fetch_sources.py`'s header comment for
+what was tried.
+
+### Not done — needs you or GitHub CLI access
+
+This machine has no `gh` CLI installed and no GitHub token available, so
+Phase 9's remaining steps — checking repo secrets, opening the PR,
+triggering a workflow run, merging, tagging — could not be completed in
+this session. See the final report for exactly what's left and the two
+ways to unblock it.
