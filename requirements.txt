@@ -14,3 +14,12 @@ openpyxl==3.1.5
 python-docx==1.2.0
 anthropic==1.8.0
 pytest==9.1.1
+# Used by the one-time verbatim-rebuild/restoration scripts in scripts/
+# (not by the daily pipeline itself, but needed for CI to run
+# tests/test_legal_text_verbatim.py, which re-invokes them as a permanent
+# check). pdfplumber is the primary extractor for the Act rebuild
+# (PyMuPDF's native DLL was blocked by Windows Application Control on the
+# machine that wrote it); pymupdf is used directly by the Rules
+# corrigendum/restoration scripts, where it loads fine.
+pdfplumber==0.11.10
+pymupdf==1.28.2
