@@ -164,7 +164,7 @@
       <span><b>1</b> AI agent</span><span class="dot-sep">·</span>
       <span><b>3</b> external sources</span><span class="dot-sep">·</span>
       <span><b>3</b> database tables</span><span class="dot-sep">·</span>
-      <span>runs <b>daily</b>, 06:00 IST</span>
+      <span>runs <b>daily</b>, scheduled 06:00 IST (00:30 UTC); in practice GitHub usually starts it ~4–5 hours later</span>
     </div>
   </header>
 
@@ -357,7 +357,7 @@
   var NODES = {
     trigger: {
       cat: "wf", title: "Daily Trigger", sub: "GitHub Actions · daily-check.yml",
-      body: "A scheduled GitHub Actions workflow: cron <code>30 0 * * *</code> (00:30 UTC / 06:00 IST), plus a manual “run now” trigger. It checks out the repository, installs Python dependencies, and runs the pipeline end to end."
+      body: "A scheduled GitHub Actions workflow: cron <code>30 0 * * *</code>, scheduled 06:00 IST (00:30 UTC); in practice GitHub usually starts it ~4–5 hours later, plus a manual “run now” trigger. It checks out the repository, installs Python dependencies, and runs the pipeline end to end."
     },
     fetch: {
       cat: "det", title: "Fetch & Diff", sub: "fetch_sources.py — deterministic, no AI",
