@@ -72,13 +72,6 @@ is Amendment/Repeal/Clarification/Correction, or null for New Provision.
 - new_full_text is the verbatim new clause text from the fetched content (or null for Repeal).
 - old_value_summary and new_value_summary are short plain-language one-liners (NOT verbatim \
 clause text) describing what changed, for the human-facing view.
-
-Respond with ONLY a JSON object of the exact shape:
-{"changes": [{"provision_id": "...", "change_type": "...", "old_value_summary": "...", \
-"new_value_summary": "...", "old_full_text": "..." or null, "new_full_text": "..." or null, \
-"confidence_score": 0.0}]}
-No prose, no markdown fences — just the JSON object. If there is no real change, respond with \
-{"changes": []}.
 """
 
 
