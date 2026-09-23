@@ -2,8 +2,12 @@ name: Daily DPDP regulatory change check
 
 on:
   schedule:
-    # 06:00 IST == 00:30 UTC. GitHub Actions cron is always UTC.
-    - cron: "30 0 * * *"
+    # 06:17 IST == 00:47 UTC. GitHub Actions cron is always UTC. Moved off
+    # the busy top-of-hour mark (00:30) per the 23 Sep 2026 audit — GitHub's
+    # scheduler queues jobs started exactly on :00/:30, sometimes by several
+    # hours; a few minutes off that mark tends to start sooner, though
+    # GitHub makes no timing guarantee either way.
+    - cron: "47 0 * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -26,14 +30,15 @@ jobs:
 
       - name: Run pipeline
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL || 'nvidia/nemotron-3-ultra-550b-a55b:free' }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'claude-haiku-4-5' }}
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
         run: python src/run_pipeline.py
 
       - name: Commit and push updated db/docs/data
+        if: always()
         run: |
           git config user.name "dpdp-change-monitor[bot]"
           git config user.email "actions@github.com"

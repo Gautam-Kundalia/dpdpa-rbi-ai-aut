@@ -27,7 +27,23 @@ def init_schema(conn: sqlite3.Connection, schema_path: Path = SCHEMA_PATH) -> No
     """Create tables if they don't exist yet. Safe to call every run."""
     sql = schema_path.read_text(encoding="utf-8")
     conn.executescript(sql)
+    _migrate_change_origin(conn)
     conn.commit()
+
+
+def _migrate_change_origin(conn: sqlite3.Connection) -> None:
+    """
+    Idempotent migration: add change_log.change_origin if it doesn't exist yet.
+    SQLite has no 'ADD COLUMN IF NOT EXISTS', so we check PRAGMA table_info first.
+    Safe to call on every startup, including on a brand-new DB where the CREATE
+    TABLE above already included the column.
+    """
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(change_log)").fetchall()}
+    if "change_origin" not in cols:
+        conn.execute(
+            "ALTER TABLE change_log ADD COLUMN change_origin TEXT "
+            "CHECK (change_origin IN ('baseline','regulatory','data_correction'))"
+        )
 
 
 def next_id(conn: sqlite3.Connection, table: str, id_col: str, prefix: str) -> str:

@@ -7,16 +7,36 @@ Trust order: PIB (early-warning trigger) -> MeitY (working copy) ->
 eGazette (authoritative confirmation).
 
 Source endpoints, and why:
-  - PIB: https://www.pib.gov.in/allRel.aspx — the public "all releases"
-    listing (English). PIB's per-ministry filter is an ASP.NET postback
-    (__doPostBack with viewstate) with no stable GET/query-string form, so
-    rather than reverse-engineer a fragile postback we hash the whole
-    recent-releases listing; any new press release (DPDP-relevant or not)
-    changes the hash and gets handed to the classifier, which is the part
-    actually deciding relevance.
+  - PIB: https://www.pib.gov.in/RssMain.aspx?ModId=6&Mid=0&reg=3&lang=1 —
+    PIB's own "all releases" RSS feed, explicitly parameterised to English
+    (lang=1) and PIB Delhi/national (reg=3). Confirmed by hand: a plain GET
+    (no cookies, no session) returns real XML with English press-release
+    titles. This replaced the earlier approach of hashing the allRel.aspx
+    HTML listing — the audit found that page can silently serve Hindi
+    depending on the client's apparent locale/language, with no way to
+    confirm from outside what language GitHub Actions' server would see;
+    lang=1 on the RSS feed removes that ambiguity by making the language an
+    explicit request parameter instead of an inferred default. Structured
+    titles are also easier for the classifier to work with than scraped
+    page text. PIB's per-ministry filter (a separate, older ASP.NET
+    postback form) still has no stable GET/query-string form, so this
+    feed — like the old page — covers all ministries; classify_change.py's
+    keyword pre-filter is what decides DPDP relevance, same as before.
   - MeitY: the two known static PDF paths (Rules, Act) already used by the
     seed scripts. These are direct file URLs — the most reliable of the
-    three sources.
+    three sources. (23 Sep 2026: looked for a MeitY page listing DPDP
+    documents to watch for new notifications/corrigenda, per the audit's
+    §1.4 finding that new Gazette notices aren't visible to any current
+    source. Two candidates — meity.gov.in/data-protection-framework and
+    meity.gov.in/documents/act-and-policies — both confirmed to list DPDP
+    documents, but both are Next.js single-page apps: a plain GET returns
+    only a ~3KB script-loading shell with no document data, and the
+    Next.js /_next/data/<buildId>/*.json pattern also returns that same
+    shell rather than real JSON, meaning the document list is fetched
+    client-side by JS after page load, not by any request this pipeline
+    can make. No stable GET-able endpoint found within the 45-minute
+    time-box for this; not adding either page as a source rather than
+    guessing at one. See CHANGELOG for the full account.)
   - eGazette (egazette.gov.in): confirmed reachable, but its real notification
     search (SearchMenu.aspx) is a session-scoped ASP.NET form (URLs carry a
     per-session "(S(...))" token, submission is postback+viewstate, no plain
@@ -24,7 +44,7 @@ Source endpoints, and why:
     automate against a production government site without deeper, ongoing
     verification. As a stopgap we hash the public home page
     (https://egazette.gov.in/) as a coarse "did anything change" signal.
-    This is weaker than the other two sources — flagged here and in the
+    This is weaker than the other sources — flagged here and in the
     project brief as needing follow-up once a stable search endpoint is
     confirmed.
 
@@ -51,9 +71,9 @@ TIMEOUT = 30
 SOURCES = [
     {
         "source": "PIB",
-        "title": "PIB — All Press Releases (English)",
-        "url": "https://www.pib.gov.in/allRel.aspx",
-        "kind": "html",
+        "title": "PIB — All Press Releases RSS (English, national)",
+        "url": "https://www.pib.gov.in/RssMain.aspx?ModId=6&Mid=0&reg=3&lang=1",
+        "kind": "rss",
     },
     {
         "source": "MeitY",
@@ -85,12 +105,20 @@ class FetchResult:
     content_text: str
     content_hash: str
     changed: bool
+    prior_hash: str | None = None  # restored by run_pipeline if classification fails,
+                                    # so the change is retried next run instead of lost
 
 
 def _extract_text(raw: bytes, kind: str) -> str:
     if kind == "pdf":
         reader = PdfReader(io.BytesIO(raw))
         return "\n".join(page.extract_text() or "" for page in reader.pages)
+    if kind == "rss":
+        soup = BeautifulSoup(raw, "xml")
+        # Only the per-release <title> text — not <link> (a PRID isn't
+        # useful signal by itself) and not the channel-level title/
+        # description (constant, would never change and adds nothing).
+        return "\n".join(item.title.get_text(strip=True) for item in soup.find_all("item") if item.title)
     soup = BeautifulSoup(raw, "html.parser")
     # Strip <script>/<style> — analytics/tracking snippets embed request-
     # specific tokens that change on every fetch, which would make the
@@ -153,7 +181,7 @@ def _upsert_source_log(conn, *, url, source, title, published_date, fetched_date
     return doc_id
 
 
-def fetch_all(conn=None) -> list[FetchResult]:
+def fetch_all(conn=None, fetch_errors: list[str] | None = None) -> list[FetchResult]:
     """
     Fetch every configured source. For each: hash it, compare to the last
     known hash for that URL, and insert a source_log row.
@@ -162,7 +190,10 @@ def fetch_all(conn=None) -> list[FetchResult]:
     first time) — these are the ones classify_change.py should look at.
     Sources that failed to fetch get processing_status='Error' and are
     skipped (not included in the return list); one source's fetch failure
-    must not block the others.
+    must not block the others. If `fetch_errors` is passed, each download
+    failure is appended to it so run_pipeline.py's exit code and email
+    reflect the failure (previously these were silent: printed but never
+    surfaced, so a broken source could fail for days with a green run).
     """
     owns_conn = conn is None
     if owns_conn:
@@ -183,12 +214,20 @@ def fetch_all(conn=None) -> list[FetchResult]:
             # content is unchanged.
             content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
         except Exception as exc:
+            # Keep the last good hash on a fetch failure, don't blank it —
+            # writing NULL here made the *next successful* fetch look like a
+            # "change" and re-trigger classification of content that never
+            # actually changed.
+            existing_before_error = _existing_row(conn, url)
+            last_good_hash = existing_before_error["content_hash"] if existing_before_error else None
             _upsert_source_log(
                 conn, url=url, source=src["source"], title=src["title"],
                 published_date=None, fetched_date=today,
-                content_hash=None, processing_status="Error",
+                content_hash=last_good_hash, processing_status="Error",
             )
             print(f"[fetch_sources] ERROR fetching {src['source']} ({url}): {exc}")
+            if fetch_errors is not None:
+                fetch_errors.append(f"fetch failed for {src['source']} ({url}): {exc}")
             continue
 
         existing = _existing_row(conn, url)
@@ -212,6 +251,7 @@ def fetch_all(conn=None) -> list[FetchResult]:
                     content_text=text,
                     content_hash=content_hash,
                     changed=True,
+                    prior_hash=prior_hash,
                 )
             )
         print(

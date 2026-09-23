@@ -1,0 +1,119 @@
+diff --git a/src/export_word.py b/src/export_word.py
+index 195be15..2a63207 100644
+--- a/src/export_word.py
++++ b/src/export_word.py
+@@ -172,15 +172,19 @@ def fetch_provisions(conn, docx_relpath):
+ 
+ def fetch_latest_amendment(conn, provision_id):
+     """
+-    Returns the most recent applied change for this provision IF it represents
+-    an actual amendment (not the initial 'New Provision' load) — i.e. the
+-    highlight/strikethrough mechanism this function feeds only activates once
+-    real changes start flowing through the pipeline.
++    Returns the change that provisions.latest_change_id points at IF it
++    represents an actual regulatory amendment (not the initial 'New Provision'
++    load). Keying on latest_change_id — rather than "the newest change_log row
++    of any non-'New Provision' type" — is what lets one-time internal data
++    corrections (change_log rows that deliberately do NOT repoint
++    latest_change_id, e.g. CHG-0033..CHG-0039) stay in the audit trail without
++    being rendered as if the government had amended the law.
+     """
+     row = conn.execute(
+-        "SELECT change_type, old_full_text, new_full_text FROM change_log "
+-        "WHERE provision_id = ? AND applied_to_master = 'Y' AND change_type != 'New Provision' "
+-        "ORDER BY detected_timestamp DESC LIMIT 1",
++        "SELECT c.change_type, c.old_full_text, c.new_full_text "
++        "FROM provisions p JOIN change_log c ON c.change_id = p.latest_change_id "
++        "WHERE p.provision_id = ? AND c.applied_to_master = 'Y' "
++        "AND c.change_type != 'New Provision'",
+         (provision_id,),
+     ).fetchone()
+     return row
+diff --git a/src/fetch_sources.py b/src/fetch_sources.py
+index 0318a8f..135d8c8 100644
+--- a/src/fetch_sources.py
++++ b/src/fetch_sources.py
+@@ -85,6 +85,8 @@ class FetchResult:
+     content_text: str
+     content_hash: str
+     changed: bool
++    prior_hash: str | None = None  # restored by run_pipeline if classification fails,
++                                   # so the change is retried next run instead of lost
+ 
+ 
+ def _extract_text(raw: bytes, kind: str) -> str:
+@@ -153,7 +155,7 @@ def _upsert_source_log(conn, *, url, source, title, published_date, fetched_date
+     return doc_id
+ 
+ 
+-def fetch_all(conn=None) -> list[FetchResult]:
++def fetch_all(conn=None, fetch_errors: list[str] | None = None) -> list[FetchResult]:
+     """
+     Fetch every configured source. For each: hash it, compare to the last
+     known hash for that URL, and insert a source_log row.
+@@ -186,9 +188,15 @@ def fetch_all(conn=None) -> list[FetchResult]:
+             _upsert_source_log(
+                 conn, url=url, source=src["source"], title=src["title"],
+                 published_date=None, fetched_date=today,
+-                content_hash=None, processing_status="Error",
++                # Keep the last good hash on a fetch failure. Writing NULL here made
++            # the next successful fetch look like a "change" and re-trigger
++            # classification of unchanged content.
++            content_hash=(_existing_row(conn, url) or {"content_hash": None})["content_hash"],
++            processing_status="Error",
+             )
+             print(f"[fetch_sources] ERROR fetching {src['source']} ({url}): {exc}")
++            if fetch_errors is not None:
++                fetch_errors.append(f"fetch failed for {src['source']} ({url}): {exc}")
+             continue
+ 
+         existing = _existing_row(conn, url)
+@@ -212,6 +220,7 @@ def fetch_all(conn=None) -> list[FetchResult]:
+                     content_text=text,
+                     content_hash=content_hash,
+                     changed=True,
++                    prior_hash=prior_hash,
+                 )
+             )
+         print(
+diff --git a/src/run_pipeline.py b/src/run_pipeline.py
+index cfa00d0..f2da25d 100644
+--- a/src/run_pipeline.py
++++ b/src/run_pipeline.py
+@@ -22,20 +22,29 @@ def main() -> int:
+     conn = get_connection()
+     init_schema(conn)
+ 
+-    changed_sources = fetch_all(conn)
+-    print(f"[run_pipeline] {len(changed_sources)} source(s) changed.")
+-
+     applied_changes: list[dict] = []
+     errors: list[str] = []
+ 
++    changed_sources = fetch_all(conn, fetch_errors=errors)
++    print(f"[run_pipeline] {len(changed_sources)} source(s) changed.")
++
+     for fetch_result in changed_sources:
+         try:
+             classified = classify(fetch_result, conn)
+-        except ClassificationFailed as exc:
+-            errors.append(str(exc))
+-            continue
+         except Exception as exc:
+-            errors.append(f"classify_change failed unexpectedly for {fetch_result.document_id} ({fetch_result.url}): {exc}")
++            if isinstance(exc, ClassificationFailed):
++                errors.append(str(exc))
++            else:
++                errors.append(f"classify_change failed unexpectedly for {fetch_result.document_id} ({fetch_result.url}): {exc}")
++            # Put the previous hash back so tomorrow's run sees this source as
++            # still changed and retries it. Without this, a single failed day
++            # silently and permanently drops the change (the new hash is
++            # already stored, so the next run reports "no change").
++            conn.execute(
++                "UPDATE source_log SET content_hash = ? WHERE document_id = ?",
++                (fetch_result.prior_hash, fetch_result.document_id),
++            )
++            conn.commit()
+             continue
+ 
+         if not classified:

@@ -164,7 +164,7 @@
       <span><b>1</b> AI agent</span><span class="dot-sep">·</span>
       <span><b>3</b> external sources</span><span class="dot-sep">·</span>
       <span><b>3</b> database tables</span><span class="dot-sep">·</span>
-      <span>runs <b>daily</b>, 06:00 IST</span>
+      <span>runs <b>daily</b>, scheduled 06:17 IST (00:47 UTC); GitHub may still start it hours late</span>
     </div>
   </header>
 
@@ -251,7 +251,7 @@
         <text class="eyebrow-txt" x="56" y="110" font-size="9.5" font-weight="600" letter-spacing="1">WORKFLOW</text>
         <text class="title-txt" x="56" y="132" font-size="15">Daily Trigger</text>
         <text class="sub-txt" x="56" y="152" font-size="10">daily-check.yml</text>
-        <text class="sub-txt" x="56" y="167" font-size="10">00:30 UTC cron</text>
+        <text class="sub-txt" x="56" y="167" font-size="10">00:47 UTC cron</text>
       </g>
 
       <!-- FETCH -->
@@ -279,7 +279,7 @@
         </g>
         <text class="title-txt" x="546" y="132" font-size="15">Classify Change</text>
         <text class="sub-txt" x="546" y="152" font-size="10">classify_change.py</text>
-        <text class="sub-txt" x="546" y="167" font-size="10">OpenRouter LLM</text>
+        <text class="sub-txt" x="546" y="167" font-size="10">Claude Haiku 4.5</text>
       </g>
 
       <!-- APPLY -->
@@ -350,14 +350,14 @@
 
   <div class="detail" id="detail" aria-live="polite"></div>
 
-  <footer>dpdpa-rbi-ai-aut · daily-check.yml · cron 30 0 * * * (UTC) · click any step above for detail</footer>
+  <footer>dpdpa-rbi-ai-aut · daily-check.yml · cron 47 0 * * * (UTC) · click any step above for detail</footer>
 </div>
 
 <script>
   var NODES = {
     trigger: {
       cat: "wf", title: "Daily Trigger", sub: "GitHub Actions · daily-check.yml",
-      body: "A scheduled GitHub Actions workflow: cron <code>30 0 * * *</code> (00:30 UTC / 06:00 IST), plus a manual “run now” trigger. It checks out the repository, installs Python dependencies, and runs the pipeline end to end."
+      body: "A scheduled GitHub Actions workflow: cron <code>47 0 * * *</code>, scheduled 06:17 IST (00:47 UTC), moved off the busy top-of-hour mark per the 23 Sep 2026 audit; GitHub may still start it hours late (queueing, not a bug in this pipeline). Plus a manual “run now” trigger. It checks out the repository, installs Python dependencies, and runs the pipeline end to end."
     },
     fetch: {
       cat: "det", title: "Fetch & Diff", sub: "fetch_sources.py — deterministic, no AI",
