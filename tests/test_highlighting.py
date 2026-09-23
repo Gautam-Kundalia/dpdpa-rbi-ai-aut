@@ -146,15 +146,20 @@ def test_corrigendum_wording_highlights_exactly_as_specified(conn):
     """
     The real DPDPR-R1 has "of this Gazette" -> "in the Official Gazette"
     corrected in BOTH sub-rule (3) and sub-rule (4) — the corrigendum's
-    two separate line-level items (page 24 lines 22 and 24) both apply
-    the identical phrase fix within the SAME provision row, not two
-    different provisions. One change_log row (with the shared old/new
-    phrase) must highlight BOTH occurrences.
+    two separate line-level items (page 24 lines 22 and 24) both apply the
+    identical phrase fix within the SAME provision row, not two different
+    provisions. Sub-rule (2), included here, ALREADY correctly said "in
+    the Official Gazette" before this correction and must NOT be
+    highlighted — only the two genuinely corrected occurrences may be
+    (this is exactly the collision scripts/apply_rules_corrigendum_2026-09-23.py's
+    widen_until_unambiguous() exists to avoid).
     """
     seed_provision(
         conn, provision_id="DPDPR-R1",
         full_text=(
             "**Rule 1 — Short title and commencement**\n\n"
+            "(2) Rules 1, 2 and 17 to 21 shall come into force on the date "
+            "of their publication in the Official Gazette.\n\n"
             "(3) Rule 4 shall come into force one year after the date of "
             "publication in the Official Gazette.\n\n"
             "(4) Rules 3, 5 to 16, 22 and 23 shall come into force eighteen "
@@ -165,7 +170,7 @@ def test_corrigendum_wording_highlights_exactly_as_specified(conn):
     _insert_change(
         conn, change_id="CHG-0100", provision_id="DPDPR-R1",
         change_type="Correction", change_origin="regulatory",
-        old_full_text="of this Gazette", new_full_text="in the Official Gazette",
+        old_full_text="of publication of this Gazette", new_full_text="of publication in the Official Gazette",
         source_document="G.S.R. 892(E)",
     )
     seed_provision(conn, provision_id="DPDPR-SDF-R13", full_text="the Departments concerned.",
