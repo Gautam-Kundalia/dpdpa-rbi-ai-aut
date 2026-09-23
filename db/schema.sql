@@ -46,6 +46,12 @@ CREATE TABLE IF NOT EXISTS change_log (
     source_document       TEXT,
     source_url            TEXT,
     detected_by            TEXT,                     -- e.g. 'agent:openrouter/<model>'
+    change_origin           TEXT CHECK (change_origin IN
+                        ('baseline','regulatory','data_correction')),
+                                                       -- 'regulatory' = the government actually changed the
+                                                       -- law/rules; 'data_correction' = we fixed our own data
+                                                       -- (typo, paraphrase, omission); 'baseline' = initial seed
+                                                       -- load. Only 'regulatory' rows are ever highlighted.
     confidence_score        REAL,
     review_status            TEXT NOT NULL DEFAULT 'Pending Review' CHECK (review_status IN
                         ('Pending Review','Approved','Rejected','Modified')),

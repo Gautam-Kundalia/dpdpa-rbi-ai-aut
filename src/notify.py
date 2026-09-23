@@ -22,6 +22,7 @@ from email.message import EmailMessage
 from dotenv import load_dotenv
 
 from db import PROJECT_ROOT
+from word_diff import change_snippet
 
 load_dotenv(PROJECT_ROOT / ".env")
 
@@ -46,9 +47,29 @@ MIME_TYPES = {
 }
 
 
-def _build_body(applied_changes: list[dict], errors: list[str]) -> tuple[str, str]:
+def _regulatory_changes(applied_changes: list[dict]) -> list[dict]:
+    """
+    Only change_origin='regulatory' rows count as "changes" for the email
+    (D1): our own data corrections are never reported here, since they
+    aren't something the government did. apply_change.py currently only
+    ever inserts 'regulatory' rows (everything run_pipeline.py applies came
+    from an AI classification of a real source change), so this filter is
+    a safety net, not a no-op — it's what keeps this email correct even
+    after data-correction tooling starts sharing the same applied_changes
+    shape.
+    """
+    return [c for c in applied_changes if c.get("change_origin", "regulatory") == "regulatory"]
+
+
+def _build_body(
+    applied_changes: list[dict],
+    errors: list[str],
+    sources_total: int = 0,
+    sources_ok: int = 0,
+) -> tuple[str, str]:
     today = date.today().isoformat()
-    n = len(applied_changes)
+    reg_changes = _regulatory_changes(applied_changes)
+    n = len(reg_changes)
 
     if errors:
         subject = f"DPDP Monitor — {len(errors)} error(s) today ({today})" + (
@@ -59,19 +80,28 @@ def _build_body(applied_changes: list[dict], errors: list[str]) -> tuple[str, st
     else:
         subject = f"DPDP Monitor — {n} change{'s' if n != 1 else ''} applied today ({today})"
 
-    if n == 0:
-        lines = ["No changes were detected across PIB, MeitY, or eGazette today."]
+    if errors:
+        # Must not read "No changes were detected" on an error day — that
+        # reads as "everything's fine" when it isn't. Say what was actually
+        # checked instead.
+        lines = [f"{sources_ok} of {sources_total} source(s) checked successfully today."]
+    elif n == 0:
+        lines = ["No regulatory changes were detected across PIB, MeitY, or eGazette today."]
     else:
-        lines = [f"{n} change{'s' if n != 1 else ''} applied today:\n"]
-        for c in applied_changes:
-            lines.append(f"  - {c['provision_id']} — {c['change_type']}: {c['new_value_summary']}")
+        lines = [f"{n} regulatory change{'s' if n != 1 else ''} applied today:\n"]
+
+    if n:
+        for c in reg_changes:
+            old_snip, new_snip = change_snippet(c.get("old_full_text"), c.get("new_full_text"))
+            ref = c.get("reference") or c.get("provision_id")
+            lines.append(f'  - {ref}: "{old_snip}" → "{new_snip}"')
 
     if errors:
         lines.append(f"\n{len(errors)} error(s) during this run:")
         for e in errors:
             lines.append(f"  - {e}")
 
-    if applied_changes:
+    if n:
         lines.append("\nUpdated Word docs and Excel tracker are attached to this email.")
 
     lines.append("\n—\nDPDP Regulatory Change Monitor (automated, no human review gate)")
@@ -89,14 +119,19 @@ def _attach_docs(msg: EmailMessage) -> None:
         )
 
 
-def send_summary(applied_changes: list[dict], errors: list[str] | None = None) -> None:
+def send_summary(
+    applied_changes: list[dict],
+    errors: list[str] | None = None,
+    sources_total: int = 0,
+    sources_ok: int = 0,
+) -> None:
     errors = errors or []
     if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
         raise RuntimeError("GMAIL_ADDRESS / GMAIL_APP_PASSWORD not set (check .env / GitHub secrets)")
     if not NOTIFY_EMAIL:
         raise RuntimeError("NOTIFY_EMAIL not set (check .env / GitHub secrets)")
 
-    subject, body = _build_body(applied_changes, errors)
+    subject, body = _build_body(applied_changes, errors, sources_total, sources_ok)
 
     msg = EmailMessage()
     msg["Subject"] = subject
@@ -104,7 +139,7 @@ def send_summary(applied_changes: list[dict], errors: list[str] | None = None) -
     msg["To"] = NOTIFY_EMAIL
     msg.set_content(body)
 
-    if applied_changes:
+    if _regulatory_changes(applied_changes):
         _attach_docs(msg)
 
     context = ssl.create_default_context()

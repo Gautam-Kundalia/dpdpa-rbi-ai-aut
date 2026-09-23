@@ -44,11 +44,11 @@ def apply(change: dict, fetch_result, conn, model_name: str) -> str:
 
     conn.execute(
         """INSERT INTO change_log
-           (change_id, detected_timestamp, provision_id, change_type,
+           (change_id, detected_timestamp, provision_id, change_type, change_origin,
             old_value_summary, new_value_summary, old_full_text, new_full_text,
             source_document, source_url, detected_by, confidence_score,
             review_status, reviewed_by, review_date, applied_to_master, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Approved', 'auto', ?, 'Y', ?)""",
+           VALUES (?, ?, ?, ?, 'regulatory', ?, ?, ?, ?, ?, ?, ?, ?, 'Approved', 'auto', ?, 'Y', ?)""",
         (
             change_id,
             now,

@@ -5,12 +5,19 @@ Layout mirrors the actual Gazette structure: each provision is a heading
 (bookmarked, for linking from Excel) followed by its verbatim clause text.
 A manual, clickable table of contents sits at the top of each document.
 
-Amendment convention (once the pipeline starts detecting real changes):
-new text is highlighted yellow; the superseded text is shown directly
-below it, struck through, under a "Previous text (superseded)" label.
-This only activates for provisions whose latest applied change has
-change_type != 'New Provision' and has old_full_text populated — right
-now, on the initial baseline load, nothing triggers it.
+Amendment convention: a provision is shown as amended only if
+provisions.latest_change_id points at an applied change_log row with
+change_origin='regulatory' and change_type != 'New Provision' — i.e. only
+a change the government actually made. Our own data corrections (typos,
+paraphrase fixes, restored omissions — change_origin='data_correction')
+are never highlighted; they stay in change_log as an audit trail only.
+
+Within a regulatory change, only the WORDS THAT CHANGED are highlighted,
+not the whole provision: old_full_text and new_full_text are compared
+word by word (see word_diff_segments below); inserted/replaced words get
+a yellow highlight, removed words get a grey strikethrough shown inline
+immediately before the text that replaced them. A small grey caption
+("Amended by <source>, <change_id>, <date>") is added under the text.
 
 Usage:
     python src/export_word.py
@@ -18,6 +25,7 @@ Usage:
 from __future__ import annotations
 
 import re
+import sys
 
 from docx import Document
 from docx.enum.text import WD_COLOR_INDEX
@@ -26,6 +34,7 @@ from docx.oxml.ns import qn
 from docx.shared import Pt, RGBColor
 
 from db import PROJECT_ROOT, get_connection
+from word_diff import diff_words
 
 DOCX_SPECS = [
     {
@@ -157,6 +166,114 @@ def render_markdown_body(doc, text: str, highlight=False, strike=False):
 
 
 # --------------------------------------------------------------------------
+# Word-level diff: highlight only the words that changed (D1/D2)
+# diff_words() lives in word_diff.py, shared with notify.py's email
+# snippets, so the docx highlighting and the email always agree.
+# --------------------------------------------------------------------------
+
+def split_blocks_with_offsets(text):
+    """Same paragraph split as render_markdown_body (on '\\n\\n'), but keeping
+    each block's (start, end) character offset within the original text."""
+    blocks = []
+    offset = 0
+    for part in text.split("\n\n"):
+        start = offset
+        end = start + len(part)
+        blocks.append((start, end, part))
+        offset = end + 2
+    return blocks
+
+
+def render_block_with_diff(paragraph, block_text, diff_start, diff_end, old_words, new_words):
+    """Render one markdown-lite block into `paragraph` as a single docx
+    paragraph, applying word-diff highlighting only to [diff_start:diff_end)."""
+    prefix = block_text[:diff_start]
+    suffix = block_text[diff_end:]
+    if prefix:
+        add_inline_runs(paragraph, prefix)
+    for words, style in diff_words(old_words, new_words):
+        text = " ".join(words)
+        if not text:
+            continue
+        run = paragraph.add_run(text)
+        if style == "delete":
+            run.font.strike = True
+            run.font.color.rgb = GREY
+        elif style == "insert":
+            run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+        paragraph.add_run(" ")
+    if suffix:
+        add_inline_runs(paragraph, suffix)
+
+
+def add_amendment_caption(doc, amendment):
+    date = (amendment["detected_timestamp"] or "")[:10]
+    p = doc.add_paragraph()
+    run = p.add_run(
+        f"Amended by {amendment['source_document'] or 'official source'} "
+        f"({amendment['change_id']}, {date})"
+    )
+    run.font.size = Pt(8.5)
+    run.font.color.rgb = GREY
+    run.italic = True
+
+
+def render_provision_body(doc, full_text, amendment):
+    """
+    Render a provision's body text. If `amendment` is a real, applied
+    regulatory change (change_origin='regulatory'), highlight only the
+    changed words within full_text and add a caption. Returns True if a
+    warning was logged (new_full_text no longer found verbatim in
+    full_text — e.g. a later data correction changed the surrounding
+    text), in which case the text is still rendered, plainly, with the
+    caption still shown.
+    """
+    full_text = full_text or ""
+    if not amendment or not amendment["new_full_text"]:
+        render_markdown_body(doc, full_text)
+        return False
+
+    new_full_text = amendment["new_full_text"]
+    idx = full_text.find(new_full_text)
+    if idx == -1:
+        render_markdown_body(doc, full_text)
+        add_amendment_caption(doc, amendment)
+        print(
+            f"WARNING: {amendment['change_id']} new_full_text is no longer a "
+            f"substring of the current full_text — rendering plainly with caption only.",
+            file=sys.stderr,
+        )
+        return True
+
+    diff_end = idx + len(new_full_text)
+    blocks = split_blocks_with_offsets(full_text)
+    target = next((b for b in blocks if b[0] <= idx and diff_end <= b[1]), None)
+
+    if target is None or is_table_block(target[2]):
+        render_markdown_body(doc, full_text)
+        add_amendment_caption(doc, amendment)
+        print(
+            f"WARNING: {amendment['change_id']}'s changed span doesn't fall "
+            f"within a single renderable paragraph — rendering plainly with caption only.",
+            file=sys.stderr,
+        )
+        return True
+
+    old_words = re.findall(r"\S+", amendment["old_full_text"] or "")
+    new_words = re.findall(r"\S+", new_full_text)
+
+    for start, end, block in blocks:
+        if (start, end) == (target[0], target[1]):
+            p = doc.add_paragraph()
+            p.paragraph_format.space_after = Pt(8)
+            render_block_with_diff(p, block, idx - start, diff_end - start, old_words, new_words)
+        else:
+            render_markdown_body(doc, block)
+    add_amendment_caption(doc, amendment)
+    return False
+
+
+# --------------------------------------------------------------------------
 # Document assembly
 # --------------------------------------------------------------------------
 
@@ -173,18 +290,21 @@ def fetch_provisions(conn, docx_relpath):
 def fetch_latest_amendment(conn, provision_id):
     """
     Returns the change that provisions.latest_change_id points at IF it
-    represents an actual regulatory amendment (not the initial 'New Provision'
-    load). Keying on latest_change_id — rather than "the newest change_log row
-    of any non-'New Provision' type" — is what lets one-time internal data
-    corrections (change_log rows that deliberately do NOT repoint
-    latest_change_id, e.g. CHG-0033..CHG-0039) stay in the audit trail without
-    being rendered as if the government had amended the law.
+    represents a real, applied REGULATORY change — change_origin='regulatory'
+    (the government actually changed the law) and change_type != 'New
+    Provision'. change_origin='data_correction' rows (our own typo/paraphrase
+    fixes) never match here, however recent they are, so they never affect
+    rendering (D1). Keying on latest_change_id — rather than "the newest
+    change_log row of any qualifying type" — is also what lets those
+    corrections stay in the audit trail without disturbing which change (if
+    any) is shown as an amendment.
     """
     row = conn.execute(
-        "SELECT c.change_type, c.old_full_text, c.new_full_text "
+        "SELECT c.change_id, c.change_type, c.old_full_text, c.new_full_text, "
+        "c.source_document, c.detected_timestamp "
         "FROM provisions p JOIN change_log c ON c.change_id = p.latest_change_id "
         "WHERE p.provision_id = ? AND c.applied_to_master = 'Y' "
-        "AND c.change_type != 'New Provision'",
+        "AND c.change_origin = 'regulatory' AND c.change_type != 'New Provision'",
         (provision_id,),
     ).fetchone()
     return row
@@ -218,6 +338,7 @@ def build_document(conn, spec):
     toc_heading.runs[0].font.color.rgb = HEADING_COLOR
 
     provisions = fetch_provisions(conn, spec["path"])
+    warnings = []
 
     bookmark_id = 1
     for row in provisions:
@@ -243,17 +364,9 @@ def build_document(conn, spec):
         meta.paragraph_format.space_after = Pt(10)
 
         amendment = fetch_latest_amendment(conn, row["provision_id"])
-        if amendment and amendment["new_full_text"]:
-            render_markdown_body(doc, amendment["new_full_text"], highlight=True)
-            if amendment["old_full_text"]:
-                prev_label = doc.add_paragraph()
-                prev_run = prev_label.add_run("Previous text (superseded):")
-                prev_run.bold = True
-                prev_run.font.size = Pt(9)
-                prev_run.font.color.rgb = GREY
-                render_markdown_body(doc, amendment["old_full_text"], strike=True)
-        else:
-            render_markdown_body(doc, row["full_text"])
+        warned = render_provision_body(doc, row["full_text"], amendment)
+        if warned:
+            warnings.append(row["provision_id"])
 
         if row["notes"]:
             note_p = doc.add_paragraph()
@@ -264,17 +377,19 @@ def build_document(conn, spec):
 
         doc.add_paragraph()  # spacing between provisions
 
-    return doc, len(provisions)
+    return doc, len(provisions), warnings
 
 
 def main():
     conn = get_connection()
     for spec in DOCX_SPECS:
-        doc, count = build_document(conn, spec)
+        doc, count, warnings = build_document(conn, spec)
         out_path = PROJECT_ROOT / spec["path"]
         out_path.parent.mkdir(parents=True, exist_ok=True)
         doc.save(out_path)
         print(f"Wrote {count} provisions -> {out_path}")
+        if warnings:
+            print(f"  {len(warnings)} warning(s), see stderr: {', '.join(warnings)}")
     conn.close()
 
 

@@ -22,6 +22,7 @@ HEADER_FILL = PatternFill(start_color="1F3864", end_color="1F3864", fill_type="s
 HEADER_FONT = Font(name=FONT_NAME, size=10, bold=True, color="FFFFFF")
 INPUT_HEADER_FILL = PatternFill(start_color="BF9000", end_color="BF9000", fill_type="solid")
 COMPUTED_HEADER_FILL = PatternFill(start_color="548235", end_color="548235", fill_type="solid")  # green = computed
+REGULATORY_FILL = PatternFill(start_color="FFF9C4", end_color="FFF9C4", fill_type="solid")  # light yellow
 THIN = Side(style="thin", color="BFBFBF")
 BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 
@@ -37,10 +38,11 @@ MP_COLS = [
 MP_INPUT_COLS = {"review_status", "reviewed_by", "review_date"}
 MP_COL_IDX = {c: i for i, c in enumerate(MP_COLS, start=1)}
 EFFECTIVE_DATE_COL_LETTER = get_column_letter(MP_COL_IDX["effective_date"])
-IN_FORCE_COL_IDX = len(MP_COLS) + 1  # appended as the last column
+IN_FORCE_COL_IDX = len(MP_COLS) + 1  # appended after the base columns
+LAST_REG_CHANGE_COL_IDX = len(MP_COLS) + 2  # appended after In_Force
 
 CL_COLS = [
-    "change_id", "detected_timestamp", "provision_id", "change_type",
+    "change_id", "detected_timestamp", "provision_id", "change_type", "change_origin",
     "old_value_summary", "new_value_summary", "source_document", "source_url",
     "detected_by", "confidence_score", "review_status", "reviewed_by",
     "review_date", "applied_to_master", "notes",
@@ -114,6 +116,17 @@ def add_list_validation(ws, col_idx, options, first_row=2, last_row=MAX_DATA_ROW
     dv.add(f"{col_letter}{first_row}:{col_letter}{last_row}")
 
 
+def highlight_regulatory_rows(ws, changes):
+    """Light-yellow-fills every cell of a Change_Log row that represents a
+    real government change (change_origin='regulatory', excluding the
+    initial 'New Provision' baseline load). D1: only real regulatory
+    changes are ever highlighted — data_correction rows are not."""
+    for r, row in enumerate(changes, start=2):
+        if row["change_origin"] == "regulatory" and row["change_type"] != "New Provision":
+            for c in range(1, len(CL_COLS) + 1):
+                ws.cell(row=r, column=c).fill = REGULATORY_FILL
+
+
 def add_in_force_column(ws, last_data_row):
     """
     Computed column: Yes/No based on comparing today's date to Effective_Date.
@@ -132,12 +145,48 @@ def add_in_force_column(ws, last_data_row):
         cell.alignment = Alignment(horizontal="center", vertical="center")
 
 
+def fetch_last_regulatory_changes(conn):
+    """
+    provision_id -> (change_id, date) for provisions whose latest_change_id
+    points at an applied, change_origin='regulatory', non-'New Provision'
+    change — same rule export_word.py uses to decide what's shown as amended
+    in the Word document, so this column always agrees with it.
+    """
+    rows = conn.execute(
+        "SELECT p.provision_id, c.change_id, c.detected_timestamp "
+        "FROM provisions p JOIN change_log c ON c.change_id = p.latest_change_id "
+        "WHERE c.applied_to_master = 'Y' AND c.change_origin = 'regulatory' "
+        "AND c.change_type != 'New Provision'"
+    ).fetchall()
+    return {r["provision_id"]: (r["change_id"], (r["detected_timestamp"] or "")[:10]) for r in rows}
+
+
+def add_last_regulatory_change_column(ws, provisions, last_reg_changes):
+    """Computed column: date + change_id of the last real government change
+    to this provision, blank if none. Highlights only this cell, never the
+    whole row (unlike Change_Log's row-level highlight)."""
+    style_header_cell(ws, 1, LAST_REG_CHANGE_COL_IDX, COMPUTED_HEADER_FILL)
+    ws.cell(row=1, column=LAST_REG_CHANGE_COL_IDX, value="Last_Regulatory_Change")
+    ws.column_dimensions[get_column_letter(LAST_REG_CHANGE_COL_IDX)].width = 22
+
+    for r, row in enumerate(provisions, start=2):
+        entry = last_reg_changes.get(row["provision_id"])
+        cell = ws.cell(row=r, column=LAST_REG_CHANGE_COL_IDX)
+        cell.border = BORDER
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        if entry:
+            change_id, date = entry
+            cell.value = f"{date} ({change_id})"
+            cell.fill = REGULATORY_FILL
+
+
 def main():
     conn = get_connection()
 
     provisions = conn.execute(f"SELECT {','.join(MP_COLS)} FROM provisions ORDER BY sort_order").fetchall()
     changes = conn.execute(f"SELECT {','.join(CL_COLS)} FROM change_log ORDER BY detected_timestamp").fetchall()
     sources = conn.execute(f"SELECT {','.join(SL_COLS)} FROM source_log ORDER BY fetched_date").fetchall()
+    last_reg_changes = fetch_last_regulatory_changes(conn)
     conn.close()
 
     wb = openpyxl.Workbook()
@@ -154,6 +203,7 @@ def main():
     set_widths(mp, [14, 14, 22, 20, 42, 24, 16, 12, 14, 16, 26, 30, 12, 16, 14, 14, 14, 30])
     last_row = write_rows(mp, MP_COLS, provisions, full_text_col="full_text_path", anchor_col="full_text_anchor")
     add_in_force_column(mp, max(last_row, 2))
+    add_last_regulatory_change_column(mp, provisions, last_reg_changes)
 
     add_list_validation(mp, MP_COL_IDX["instrument_type"],
                          ["Act Section", "Rule", "Sub-Rule", "Schedule", "Notification", "Board Order"])
@@ -171,11 +221,14 @@ def main():
         cl.cell(row=1, column=i, value=h.replace("_", " ").title().replace(" ", "_"))
     input_idx = {i for i, c in enumerate(CL_COLS, start=1) if c in CL_INPUT_COLS}
     style_header(cl, len(CL_COLS), input_idx)
-    set_widths(cl, [12, 18, 14, 16, 36, 36, 26, 30, 20, 12, 16, 14, 14, 14, 28])
+    set_widths(cl, [12, 18, 14, 16, 14, 36, 36, 26, 30, 20, 12, 16, 14, 14, 14, 28])
     write_rows(cl, CL_COLS, changes)
+    highlight_regulatory_rows(cl, changes)
 
     add_list_validation(cl, CL_COL_IDX["change_type"],
                          ["New Provision", "Amendment", "Repeal", "Clarification", "Correction"])
+    add_list_validation(cl, CL_COL_IDX["change_origin"],
+                         ["baseline", "regulatory", "data_correction"])
     add_list_validation(cl, CL_COL_IDX["review_status"],
                          ["Pending Review", "Approved", "Rejected", "Modified"])
     add_list_validation(cl, CL_COL_IDX["applied_to_master"], ["Y", "N"])
@@ -249,13 +302,16 @@ def build_readme(wb):
              "(DPDP_Rules_2025.docx or DPDP_Act_2023.docx), jumping straight to that "
              "provision's bookmark.")
     r = para(r, "Change_Log",
-             "Append-only. One row per detected change, whether or not it has been approved. "
-             "Never edit or delete past rows — that history is the audit trail. Provision_ID "
+             "Append-only. One row per detected change, whether it was a real government "
+             "change or one of our own internal data corrections (see Change_Origin below) — "
+             "never edit or delete past rows, that history is the audit trail. Provision_ID "
              "links a change back to its row in Master_Provisions.")
     r = para(r, "Source_Log",
-             "One row per source document the agent has fetched (MeitY page, Gazette "
-             "notification, PIB release). Prevents reprocessing the same document twice and "
-             "gives you a paper trail of what was checked and when.")
+             "One row per source address (URL) the pipeline watches (a MeitY page, a Gazette "
+             "notification, a PIB listing) — not one row per fetch. Each row is overwritten "
+             "every run with the latest fetch's date and content fingerprint, so this sheet "
+             "shows what's being watched right now and when it was last checked, not a "
+             "history of past runs. Past detected changes live in Change_Log instead.")
     r += 1
 
     r = section(r, "Status vs. In_Force — these answer different questions")
@@ -274,14 +330,24 @@ def build_readme(wb):
 
     r = section(r, "Full text & amendment highlighting")
     r = para(r, "Where full text lives",
-             "Verbatim clause text is stored in the database and rendered into the two "
-             "consolidated Word documents by src/export_word.py — never duplicated or "
-             "paraphrased here.")
-    r = para(r, "Amendment convention",
-             "When a future change updates a clause, the Word document highlights the new "
-             "text in yellow and shows the superseded text struck through directly below it, "
-             "under a 'Previous text (superseded)' label — so nothing is silently lost, and "
-             "what changed is visible at a glance in context.")
+             "Verbatim clause text — word for word from the official Act and Rules PDFs — is "
+             "stored in the database and rendered into the two consolidated Word documents by "
+             "src/export_word.py — never duplicated or paraphrased here.")
+    r = para(r, "What Change_Origin means",
+             "'regulatory' = the government actually changed the law or rules (an amendment, "
+             "repeal, clarification, or an official corrigendum). 'data_correction' = we fixed "
+             "our own data (a typo, a paraphrase we've since replaced with verbatim text, text "
+             "we'd left out) — the law itself did not change. 'baseline' = the initial seed "
+             "load, not a change at all.")
+    r = para(r, "Amendment highlighting rule",
+             "Only a 'regulatory' change is ever highlighted, and only the specific words that "
+             "changed — not the whole provision. In the Word documents: the changed words are "
+             "highlighted yellow, with any removed words shown struck through in grey "
+             "immediately before their replacement, plus a small caption naming the source and "
+             "change. In this Change_Log sheet, an entire row is filled light yellow when it's "
+             "a regulatory change. Our own data corrections are never highlighted anywhere — "
+             "they stay in Change_Log as a record, but the current, correct text is simply "
+             "shown as-is, with nothing marked up.")
     r += 1
 
     r = section(r, "Color legend")
@@ -305,13 +371,27 @@ def build_readme(wb):
                 value="Everything else (dark blue headers) is populated by the agent from source documents.")
     readme.cell(row=r, column=2).font = Font(name=FONT_NAME, size=10)
     readme.cell(row=r, column=2).alignment = Alignment(wrap_text=True)
+    r += 1
+    c3 = readme.cell(row=r, column=1, value="")
+    c3.fill = REGULATORY_FILL
+    readme.cell(row=r, column=2,
+                value="Light yellow marks a real government change: the whole row in Change_Log, "
+                      "or just the Last_Regulatory_Change cell in Master_Provisions.")
+    readme.cell(row=r, column=2).font = Font(name=FONT_NAME, size=10)
+    readme.cell(row=r, column=2).alignment = Alignment(wrap_text=True)
     r += 2
 
-    r = section(r, "Recommended workflow")
-    r = para(r, "1. Detect", "Agent checks Source_Log-tracked sources on schedule; new/changed documents get a new Source_Log row.")
-    r = para(r, "2. Extract & classify", "Agent extracts provisions and proposes a Change_Log row (Change_Type, Old/New value, Confidence).")
-    r = para(r, "3. Review", "Anything below the confidence threshold (or any change to a number, deadline, or obligation) sits with Review_Status = Pending Review until a consultant checks it.")
-    r = para(r, "4. Apply", "Once approved, Master_Provisions is updated, Change_Log's Applied_To_Master is marked Y, and re-running export_word.py renders the amendment highlight into the consolidated document. Rejected changes stay in Change_Log for the record but never touch Master_Provisions or the docx.")
+    r = section(r, "How a change actually gets applied")
+    r = para(r, "No human review gate",
+             "This pipeline runs fully automatically, every day, with no human approval step "
+             "before a detected change is written to Master_Provisions. Review_Status on a "
+             "Change_Log row records how confident the automated classification was — it is "
+             "not a queue waiting for a consultant's sign-off. If you want a human check before "
+             "a change goes live, that would need to be added as a deliberate change to the "
+             "pipeline; right now, it isn't there.")
+    r = para(r, "1. Detect", "The pipeline checks each Source_Log-tracked address on schedule; a changed fingerprint updates that row.")
+    r = para(r, "2. Extract & classify", "Only the changed passages of the source are compared against the current text and sent to Claude, which reports what changed and how (Change_Type, Change_Origin, Old/New text).")
+    r = para(r, "3. Apply, automatically", "Master_Provisions is updated immediately, Change_Log's Applied_To_Master is marked Y, and the next export_word.py / export_excel.py run renders the result — a highlighted amendment if Change_Origin is 'regulatory', nothing visible if it's a 'data_correction'.")
 
     for row in readme.iter_rows(min_row=1, max_row=r, min_col=1, max_col=2):
         for cell in row:

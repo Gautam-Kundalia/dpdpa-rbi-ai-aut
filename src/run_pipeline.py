@@ -11,6 +11,8 @@ from __future__ import annotations
 import subprocess
 import sys
 
+from datetime import date
+
 from apply_change import apply
 from classify_change import CLAUDE_MODEL, ClassificationFailed, classify
 from db import get_connection, init_schema
@@ -48,10 +50,27 @@ def main() -> int:
         for change in classified:
             try:
                 change_id = apply(change, fetch_result, conn, CLAUDE_MODEL)
-                applied_changes.append({**change, "change_id": change_id})
+                ref_row = conn.execute(
+                    "SELECT reference FROM provisions WHERE provision_id = ?", (change["provision_id"],)
+                ).fetchone()
+                applied_changes.append({
+                    **change,
+                    "change_id": change_id,
+                    "change_origin": "regulatory",
+                    "reference": ref_row["reference"] if ref_row else change["provision_id"],
+                })
                 print(f"[run_pipeline] applied {change_id} -> {change['provision_id']} ({change['change_type']})")
             except Exception as exc:
                 errors.append(f"apply_change failed for {change.get('provision_id')}: {exc}")
+
+    today = date.today().isoformat()
+    sources_total = conn.execute(
+        "SELECT COUNT(*) c FROM source_log WHERE fetched_date = ?", (today,)
+    ).fetchone()["c"]
+    sources_ok = conn.execute(
+        "SELECT COUNT(*) c FROM source_log WHERE fetched_date = ? AND processing_status != 'Error'",
+        (today,),
+    ).fetchone()["c"]
 
     conn.close()
 
@@ -65,7 +84,7 @@ def main() -> int:
         print("[run_pipeline] no changes applied — skipping doc regeneration.")
 
     try:
-        send_summary(applied_changes, errors)
+        send_summary(applied_changes, errors, sources_total, sources_ok)
     except Exception as exc:
         print(f"[run_pipeline] WARNING: notify failed: {exc}")
         errors.append(f"notify failed: {exc}")
