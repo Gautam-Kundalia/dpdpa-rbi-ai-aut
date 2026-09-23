@@ -143,24 +143,45 @@ def test_regulatory_change_no_longer_matching_current_text_renders_plainly_with_
 # --------------------------------------------------------------------------
 
 def test_corrigendum_wording_highlights_exactly_as_specified(conn):
-    cases = [
-        ("DPDPR-R1_3", "the date of its publication in the Official Gazette.",
-         "of this Gazette", "in the Official Gazette", ["in the Official Gazette"]),
-        ("DPDPR-R1_4", "the date of its publication in the Official Gazette.",
-         "of this Gazette", "in the Official Gazette", ["in the Official Gazette"]),
-        ("DPDPR-SDF-R13", "the Departments concerned.",
-         "Department", "Departments", ["Departments"]),
-        ("DPDPR-R23", "given in such order.",
-         "given in such", "given in such order", ["order"]),
-    ]
-    for i, (pid, full_text, old, new, expected_highlights) in enumerate(cases):
-        seed_provision(conn, provision_id=pid, full_text=full_text,
-                        full_text_anchor=f"anchor{i}", sort_order=i + 1)
-        _insert_change(
-            conn, change_id=f"CHG-{100+i}", provision_id=pid,
-            change_type="Correction", change_origin="regulatory",
-            old_full_text=old, new_full_text=new, source_document="G.S.R. 892(E)",
-        )
+    """
+    The real DPDPR-R1 has "of this Gazette" -> "in the Official Gazette"
+    corrected in BOTH sub-rule (3) and sub-rule (4) — the corrigendum's
+    two separate line-level items (page 24 lines 22 and 24) both apply
+    the identical phrase fix within the SAME provision row, not two
+    different provisions. One change_log row (with the shared old/new
+    phrase) must highlight BOTH occurrences.
+    """
+    seed_provision(
+        conn, provision_id="DPDPR-R1",
+        full_text=(
+            "**Rule 1 — Short title and commencement**\n\n"
+            "(3) Rule 4 shall come into force one year after the date of "
+            "publication in the Official Gazette.\n\n"
+            "(4) Rules 3, 5 to 16, 22 and 23 shall come into force eighteen "
+            "months after the date of publication in the Official Gazette."
+        ),
+        full_text_anchor="anchor_r1", sort_order=1,
+    )
+    _insert_change(
+        conn, change_id="CHG-0100", provision_id="DPDPR-R1",
+        change_type="Correction", change_origin="regulatory",
+        old_full_text="of this Gazette", new_full_text="in the Official Gazette",
+        source_document="G.S.R. 892(E)",
+    )
+    seed_provision(conn, provision_id="DPDPR-SDF-R13", full_text="the Departments concerned.",
+                   full_text_anchor="anchor_r13", sort_order=2)
+    _insert_change(
+        conn, change_id="CHG-0101", provision_id="DPDPR-SDF-R13",
+        change_type="Correction", change_origin="regulatory",
+        old_full_text="Department", new_full_text="Departments", source_document="G.S.R. 892(E)",
+    )
+    seed_provision(conn, provision_id="DPDPR-R23", full_text="given in such order.",
+                   full_text_anchor="anchor_r23", sort_order=3)
+    _insert_change(
+        conn, change_id="CHG-0102", provision_id="DPDPR-R23",
+        change_type="Correction", change_origin="regulatory",
+        old_full_text="given in such", new_full_text="given in such order", source_document="G.S.R. 892(E)",
+    )
 
     doc, count, warnings = ew.build_document(conn, DOCX_SPEC)
     assert warnings == []

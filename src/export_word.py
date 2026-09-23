@@ -184,13 +184,20 @@ def split_blocks_with_offsets(text):
     return blocks
 
 
-def render_block_with_diff(paragraph, block_text, diff_start, diff_end, old_words, new_words):
-    """Render one markdown-lite block into `paragraph` as a single docx
-    paragraph, applying word-diff highlighting only to [diff_start:diff_end)."""
-    prefix = block_text[:diff_start]
-    suffix = block_text[diff_end:]
-    if prefix:
-        add_inline_runs(paragraph, prefix)
+def _find_all_spans(text, sub):
+    """All non-overlapping (start, end) occurrences of `sub` in `text`."""
+    spans = []
+    start = 0
+    while True:
+        idx = text.find(sub, start)
+        if idx == -1:
+            break
+        spans.append((idx, idx + len(sub)))
+        start = idx + len(sub)
+    return spans
+
+
+def _add_diff_words(paragraph, old_words, new_words):
     for words, style in diff_words(old_words, new_words):
         text = " ".join(words)
         if not text:
@@ -202,6 +209,26 @@ def render_block_with_diff(paragraph, block_text, diff_start, diff_end, old_word
         elif style == "insert":
             run.font.highlight_color = WD_COLOR_INDEX.YELLOW
         paragraph.add_run(" ")
+
+
+def render_block_with_diff(paragraph, block_text, spans, old_words, new_words):
+    """
+    Render one markdown-lite block into `paragraph` as a single docx
+    paragraph, applying word-diff highlighting at every span in `spans`
+    (a list of (start, end) character offsets within block_text) — a
+    single provision can contain the SAME corrected phrase more than once
+    (e.g. Rule 1(3) and 1(4) both had "of this Gazette" corrected by the
+    same corrigendum item), and every occurrence must be highlighted, not
+    just the first.
+    """
+    pos = 0
+    for start, end in spans:
+        prefix = block_text[pos:start]
+        if prefix:
+            add_inline_runs(paragraph, prefix)
+        _add_diff_words(paragraph, old_words, new_words)
+        pos = end
+    suffix = block_text[pos:]
     if suffix:
         add_inline_runs(paragraph, suffix)
 
@@ -222,7 +249,10 @@ def render_provision_body(doc, full_text, amendment):
     """
     Render a provision's body text. If `amendment` is a real, applied
     regulatory change (change_origin='regulatory'), highlight only the
-    changed words within full_text and add a caption. Returns True if a
+    changed words within full_text and add a caption — at EVERY occurrence
+    of new_full_text, since one corrigendum/amendment item can correct the
+    same phrase more than once within a single provision (e.g. Rule 1(3)
+    and 1(4) both had "of this Gazette" corrected). Returns True if a
     warning was logged (new_full_text no longer found verbatim in
     full_text — e.g. a later data correction changed the surrounding
     text), in which case the text is still rendered, plainly, with the
@@ -234,8 +264,7 @@ def render_provision_body(doc, full_text, amendment):
         return False
 
     new_full_text = amendment["new_full_text"]
-    idx = full_text.find(new_full_text)
-    if idx == -1:
+    if new_full_text not in full_text:
         render_markdown_body(doc, full_text)
         add_amendment_caption(doc, amendment)
         print(
@@ -245,16 +274,21 @@ def render_provision_body(doc, full_text, amendment):
         )
         return True
 
-    diff_end = idx + len(new_full_text)
     blocks = split_blocks_with_offsets(full_text)
-    target = next((b for b in blocks if b[0] <= idx and diff_end <= b[1]), None)
+    # Every block that contains at least one occurrence of new_full_text
+    # (and isn't a table — those aren't rendered via this paragraph path).
+    diff_blocks = {
+        (start, end): _find_all_spans(block, new_full_text)
+        for start, end, block in blocks
+        if new_full_text in block and not is_table_block(block)
+    }
 
-    if target is None or is_table_block(target[2]):
+    if not diff_blocks:
         render_markdown_body(doc, full_text)
         add_amendment_caption(doc, amendment)
         print(
-            f"WARNING: {amendment['change_id']}'s changed span doesn't fall "
-            f"within a single renderable paragraph — rendering plainly with caption only.",
+            f"WARNING: {amendment['change_id']}'s changed text only appears inside a table "
+            f"or spans multiple paragraphs — rendering plainly with caption only.",
             file=sys.stderr,
         )
         return True
@@ -263,10 +297,11 @@ def render_provision_body(doc, full_text, amendment):
     new_words = re.findall(r"\S+", new_full_text)
 
     for start, end, block in blocks:
-        if (start, end) == (target[0], target[1]):
+        spans = diff_blocks.get((start, end))
+        if spans:
             p = doc.add_paragraph()
             p.paragraph_format.space_after = Pt(8)
-            render_block_with_diff(p, block, idx - start, diff_end - start, old_words, new_words)
+            render_block_with_diff(p, block, spans, old_words, new_words)
         else:
             render_markdown_body(doc, block)
     add_amendment_caption(doc, amendment)
