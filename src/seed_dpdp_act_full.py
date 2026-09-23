@@ -313,10 +313,13 @@ def build_change_row(change_id, pid, summary, full_text, eff_note):
     }
 
 
-def main():
-    DB_PATH = PROJECT_ROOT / "db" / "dpdpa.db"
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = get_connection()
+def main(db_path=None):
+    """db_path: optional override, for tests — seeds a scratch database
+    instead of the real db/dpdpa.db. Defaults to the real one."""
+    if db_path is None:
+        db_path = PROJECT_ROOT / "db" / "dpdpa.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = get_connection(db_path)
     init_schema(conn)
 
     verbatim_full_text = load_verbatim_full_text()
