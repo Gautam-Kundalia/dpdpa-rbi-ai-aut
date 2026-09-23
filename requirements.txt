@@ -1,5 +1,6 @@
 requests==2.34.2
 beautifulsoup4==4.15.0
+lxml==6.1.3  # BeautifulSoup's 'xml' parser (used for the PIB RSS feed) needs this
 # Pinned exactly, not just >=: pypdf's text extraction changed between
 # versions enough to change the SHA-256 of the *extracted text* for the
 # same PDF bytes (pypdf 3.17.4 gave a different fingerprint than 6.19.0 for
