@@ -75,6 +75,18 @@ CREATE TABLE IF NOT EXISTS source_log (
     linked_change_ids           TEXT                   -- comma-separated change_ids produced from this doc
 );
 
+CREATE TABLE IF NOT EXISTS source_snapshot (
+    document_id         TEXT PRIMARY KEY REFERENCES source_log(document_id),
+    content_hash          TEXT,                  -- matches source_log.content_hash as of this snapshot
+    content_text           TEXT,                  -- the extracted text as classify_change.py last saw it
+    fetched_date             TEXT                   -- ISO date this snapshot was taken
+);
+-- Holds the text from the last SUCCESSFULLY CLASSIFIED fetch of each source
+-- (not just the last fetch) — classify_change.py diffs the new fetch
+-- against this instead of re-sending the whole document to the model every
+-- time. Deliberately not updated when classification fails, so a retried
+-- run diffs against the same known-good baseline as the failed run did.
+
 CREATE INDEX IF NOT EXISTS idx_change_log_provision ON change_log(provision_id);
 CREATE INDEX IF NOT EXISTS idx_change_log_review_status ON change_log(review_status);
 CREATE INDEX IF NOT EXISTS idx_provisions_review_status ON provisions(review_status);

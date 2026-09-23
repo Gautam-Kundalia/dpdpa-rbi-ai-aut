@@ -102,7 +102,13 @@ def _build_body(
             lines.append(f"  - {e}")
 
     if n:
-        lines.append("\nUpdated Word docs and Excel tracker are attached to this email.")
+        lines.append(
+            "\nEach provision's plain-language summary (Current_Summary) is left as-is by this "
+            "pipeline even when its text changes — it may need a human update to still read "
+            "naturally against the new wording. Check Change_Log's Old/New_Value_Summary above "
+            "for what actually changed."
+        )
+        lines.append("Updated Word docs and Excel tracker are attached to this email.")
 
     lines.append("\n—\nDPDP Regulatory Change Monitor (automated, no human review gate)")
     return subject, "\n".join(lines)
