@@ -497,3 +497,47 @@ Phase 9's remaining steps — checking repo secrets, opening the PR,
 triggering a workflow run, merging, tagging — could not be completed in
 this session. See the final report for exactly what's left and the two
 ways to unblock it.
+
+## 2026-09-25 — eGazette fetch timeout raised (30s → 60s), uncommitted
+
+Real production error from the Sep 24 06:17 IST daily run:
+
+```
+fetch failed for eGazette (https://egazette.gov.in/):
+HTTPSConnectionPool(host='egazette.gov.in', port=443): Read timed out. (read timeout=30)
+```
+
+In plain words: the pipeline tried to download the eGazette homepage and
+gave up after 30 seconds because the site hadn't answered yet. Gautam
+manually opened the same page in a browser and confirmed it's genuinely
+working, just slow — not down, not blocking automated requests, not
+serving something unexpected. Since this looks like a real, working page
+being cut off too early rather than a broken source, the fix is to give
+it more time, not to investigate further right now.
+
+**What changed:** `src/fetch_sources.py`'s `TIMEOUT` constant raised from
+30 to 60 seconds. This is a single constant shared by every source's
+fetch call (PIB, both MeitY PDFs, and eGazette), not a per-source
+setting, so all four sources now get the longer allowance — harmless for
+the fast sources, and gives the slow one twice the room it had.
+
+**Why not something more elaborate:** the 23 Sep fixes already made this
+failure mode safe even without a longer timeout — a fetch failure keeps
+the last-known-good fingerprint and is reported by email, never
+swallowed, so a slow eGazette day was never silently losing data or
+going unnoticed. Doubling the timeout is the smallest change that
+matches what was actually observed (a slow site, not a dead one). If
+read timeouts keep happening even at 60 seconds, the next step would be
+a short retry-with-backoff specifically for eGazette's fetch, not a
+further blind increase in the wait time.
+
+**Status: edited, not yet committed or pushed.** The file was changed
+directly on Gautam's machine via the Filesystem device bridge. It still
+needs `git add src/fetch_sources.py`, a commit, and a push to `main`
+before it takes effect on the real GitHub Actions daily run — until that
+happens, production is still running the old 30-second timeout, and
+tomorrow's scheduled run could still time out the same way.
+
+### Cost
+
+$0 — a plain code edit, no API calls involved.

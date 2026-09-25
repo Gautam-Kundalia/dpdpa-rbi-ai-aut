@@ -66,7 +66,14 @@ from pypdf import PdfReader
 from db import get_connection, init_schema, next_id
 
 USER_AGENT = "Mozilla/5.0 (compatible; DPDPAChangeMonitor/1.0)"
-TIMEOUT = 30
+# Bumped from 30 -> 60 seconds on 2026-09-24: egazette.gov.in was confirmed
+# (by manually opening it in a browser) to be a slow-loading but genuinely
+# working site, not a dead one. A 30s timeout was hitting a real, working
+# page mid-load. 60s gives it room without letting one very slow source
+# stall a run for an unbounded amount of time. If timeouts keep happening
+# even at 60s, the next step is a short retry-with-backoff, not a further
+# blind increase.
+TIMEOUT = 60
 
 SOURCES = [
     {
