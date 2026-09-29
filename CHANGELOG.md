@@ -643,3 +643,81 @@ checked them.
   writes new change_log rows as `Approved` by `auto`.
 
 Cost: $0 — no API calls.
+
+## 2026-09-30 — Document discovery: catching *new* DPDP documents, not just edits (branch `detection-coverage-fix`, not merged to `main` yet)
+
+**The problem, in plain words:** the daily check reads exactly four web
+pages and looks for edits to them. But real Indian law changes are never
+published as edits to an old PDF — they come out as brand-new, separate
+documents instead. The December 2025 corrigendum (an official notice fixing
+printing mistakes in the DPDP Rules) is the real example: the original
+Rules PDF on MeitY's website was never touched, so the daily check would
+never have noticed the fix — it had to be found and added by hand during
+the 23 Sep audit. This session adds a second, separate layer that watches
+for brand-new documents appearing, and proves — using that real corrigendum
+as a known test case — that it would have caught it.
+
+**What it does now:** a new module, `src/discover_documents.py`, watches
+eGazette's real document search (filtered to the Ministry of Electronics &
+IT) using a real, invisible Chrome browser (Playwright) to work through its
+multi-step search form — confirmed to have no CAPTCHA anywhere in that
+flow. It remembers every document it has ever seen. When a genuinely new
+one appears whose title, link, or text looks DPDP-related, it emails an
+alert: title, source, date, link, and a short excerpt of the document's
+text.
+
+**What it deliberately does NOT do:** it never changes `provisions`,
+`change_log`, the Word documents, or the Excel tracker. A brand-new
+document has no earlier version to compare against, and this project's
+rule that legal text must come from a PDF through code — never typed or
+guessed — means a human still has to decide what, if anything, to apply,
+the same way the December 2025 corrigendum itself was applied by hand
+(`scripts/apply_rules_corrigendum_2026-09-23.py`).
+
+**What to expect on the first run:** everything the eGazette search
+currently lists gets quietly recorded as a starting point — one line in the
+normal daily email ("baseline captured for egazette-meity: N document(s)"),
+no per-document alerts (a flood of alerts about documents that were already
+there would just be noise). From the next run onward, a genuinely new,
+DPDP-relevant document triggers an email whose subject starts with
+`ACTION NEEDED — new DPDP-related document found`, impossible to miss even
+skimming only the subject line.
+
+**What was investigated and ruled out:** MeitY's own two pages that list
+DPDP documents were tried again, more thoroughly this time (a real headless
+browser, not just a plain web request) — both are blocked outright by the
+site's own bot-detection (HTTP 403, even using a completely ordinary Chrome
+browser signature). This is a genuine block, and per this project's rule
+against ever trying to get around a block, it was left alone; this remains
+a real, honest gap in coverage. PIB's existing feed was also examined as a
+possible second discovery source and ruled out — it holds only 20 items
+across every ministry, with no date on any individual item, so a relevant
+release could easily scroll off before the next day's check; no stable
+MeitY-only version of it could be found either. Full write-up, including
+exactly what was tried and why each dead end is a dead end, in
+`docs/detection_coverage_2026-09-30.md`.
+
+**Proof it works:** an automated test replays the December 2025 corrigendum
+exactly as eGazette actually presented it — a hashed-filename PDF link and
+a neutral title containing no DPDP keyword — and confirms it's still caught,
+because the document's own text is read and keyword-matched, not just its
+title or link. Separately, the real eGazette search was queried live for
+December 2025 and does list the real corrigendum (Gazette ID
+`CG-DL-E-12122025-268455`) among 5 real results. A live, read-only run
+against a throwaway copy of today's database (30 Sep 2026) does NOT show
+the corrigendum — it's outside the ~2-month rolling window the search
+covers on any given day, which is expected and stated plainly in the
+findings doc rather than glossed over.
+
+**Tests:** 12 new tests (`tests/test_discover_documents.py`) — baseline
+capture, repeat runs staying quiet, the corrigendum replay above, relevance
+rules, an unreadable PDF still alerting instead of being dropped, the
+canary that catches the detector itself breaking, one failing source not
+blocking others, a failed email being retried instead of losing the alert,
+email subject/body wording, and a schema check that the two new tables are
+added without touching any existing table or row. All existing tests still
+pass — 64 before this session, 76 after, zero new failures.
+
+**Cost:** $0 — no AI calls anywhere in this (keyword matching and reading
+PDF text with `pypdf`, same rule as the rest of this project's classifier
+input pipeline).

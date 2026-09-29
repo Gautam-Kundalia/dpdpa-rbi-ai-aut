@@ -50,6 +50,17 @@ summary email per run (Gmail SMTP) regardless of whether anything changed.
 commits db/docs/data back to the repo.
 ```
 
+Separately (added 30 Sep 2026), `src/discover_documents.py` watches pages that
+*list* documents — eGazette's Ministry of Electronics & IT search, currently —
+and alerts by email when a brand-new document appears. This is a different
+job from the pipeline above: fetch_sources.py only notices when one of its
+four known URLs is *edited*, which real amendments and corrigenda almost
+never are (they're published as separate, brand-new documents instead — the
+"Not yet built"/"Document discovery" sections below explain why, and
+`docs/detection_coverage_2026-09-30.md` has the full investigation). It never
+writes to `provisions`/`change_log` — see that section for what it does
+instead.
+
 SQLite holds the real, current state, **including the verbatim clause
 text** (`provisions.full_text` — word for word from the official Act and
 Rules PDFs, no paraphrasing, no abridging). The Excel workbook and the two
@@ -96,12 +107,14 @@ Three sources, in trust order:
    requesting client's apparent locale with no way to confirm what
    language GitHub Actions' server would see.
 2. **MeitY** — the two known static PDF paths (DPDP Rules 2025, DPDP Act
-   2023) — the most reliable source, direct file URLs. (MeitY does have a
-   page listing DPDP documents, which would catch a *new* notification or
-   corrigendum that these two fixed PDF URLs can't — but it's a Next.js
-   single-page app with no server-rendered content and no reachable JSON
-   API; a plain GET returns an empty shell. Investigated, not wired up —
-   see `fetch_sources.py`'s header comment.)
+   2023) — the most reliable source, direct file URLs. (MeitY does have
+   two pages listing DPDP documents, which would catch a *new*
+   notification or corrigendum that these two fixed PDF URLs can't — but
+   they're Next.js single-page apps with no server-rendered content, and a
+   real headless browser gets blocked outright (HTTP 403) by the site's own
+   bot-detection. Investigated twice now, genuinely not reachable either
+   way — see `fetch_sources.py`'s header comment and
+   `docs/detection_coverage_2026-09-30.md`.)
 3. **eGazette** (`https://egazette.gov.in/`) — meant to be the
    authoritative confirmation source, but its real notification search is
    a session-scoped ASP.NET postback form (no stable endpoint found).
@@ -178,7 +191,7 @@ human update.
 ```
 db/
   schema.sql        table definitions (provisions, change_log, source_log,
-                     source_snapshot)
+                     source_snapshot, discovered_documents, discovery_run_log)
   dpdpa.db          the actual database — source of truth, committed to git
   backup/           pre-fix database snapshots (gitignored)
 docs/
@@ -202,6 +215,10 @@ src/
   seed_dpdp_act_full.py     loads all 44 Act sections + Schedule, from
                              data/act_verbatim_2026-09-23.json
   fetch_sources.py          fetches PIB/MeitY/eGazette, hash-based change detection
+  discover_documents.py     alert-only: watches document *listings* (eGazette
+                             ministry search) for brand-new documents; never
+                             touches provisions/change_log — see "Document
+                             discovery" above
   classify_change.py        diff-first classification -> Claude Haiku 4.5,
                              strict tool-use, validated
   apply_change.py           applies a validated change to provisions + change_log
@@ -262,22 +279,61 @@ still start it hours late, a scheduler-queueing effect outside this
 pipeline's control), and can also be triggered manually from the Actions
 tab (`workflow_dispatch`).
 
+## Document discovery — what happens when a *new* document appears
+
+Real DPDP law changes almost never edit one of the four URLs above — they show
+up as brand-new, separate documents instead (the December 2025 corrigendum to
+the Rules is the real example that motivated this: the original Rules PDF was
+never touched). `src/discover_documents.py` is a second, separate layer for
+exactly this case: it watches pages that *list* documents — right now,
+eGazette's "Search by Ministry" filtered to the Ministry of Electronics & IT
+(driven with a real, invisible Chrome browser via Playwright, since that
+search is a multi-step form) — and remembers what it's already seen.
+
+**This layer is alert-only.** A newly discovered document never touches
+`provisions`, `change_log`, the Word files, or the Excel tracker — it has no
+prior version to diff against, and this project's rule that legal text must
+come from a PDF through code (never typed or guessed) means a human has to
+decide what to do with it. See `scripts/apply_rules_corrigendum_2026-09-23.py`
+for what that "a human decides, with Claude's help" step actually looks like
+in practice.
+
+**What to expect on the very first run for a new source:** everything it
+currently lists gets quietly recorded as a starting point ("baseline
+captured for egazette-meity: N document(s)" — one line in the normal daily
+email) — not a flood of alerts about documents that were already there.
+**From the next run onward:** if something new and DPDP-relevant shows up,
+the day's email subject starts with `ACTION NEEDED — new DPDP-related
+document found`, and the body lists the document's title, source, date,
+link, and a short excerpt of its text, with the reminder that nothing in the
+database has changed automatically. If a newly-found document's PDF can't be
+read for some reason, it's still alerted (never silently dropped) — just
+without an excerpt.
+
 ## Not yet built
 
-- A stable, verified eGazette search/filter endpoint (currently best-effort
-  home-page hashing — see "Sources & change detection" above)
-- A reachable endpoint for MeitY's own DPDP-documents listing page (it
-  exists but is a client-side-rendered SPA — see above)
+- A stable, verified eGazette search/filter endpoint **for the main daily
+  fetch/classify pipeline above** — separate from the new discovery layer,
+  which does have a working eGazette search now (see above). The old,
+  coarse home-page hash is still what `fetch_sources.py` uses for its own
+  change detection.
+- MeitY's own DPDP-documents listing pages, for the same reason as above —
+  investigated for discovery too, genuinely blocked (see "Sources & change
+  detection").
 - RBI half of the project
 
 ## Known limitations
 
-- **eGazette** doesn't have a confirmed stable search endpoint yet (see
-  above) — its signal is weaker than PIB/MeitY.
+- **eGazette**'s *fetch_sources.py* signal still doesn't have a confirmed
+  stable search endpoint for its own change detection (see above) — its
+  signal is weaker than PIB/MeitY there. The separate discovery layer's
+  eGazette search (above) does not have this limitation.
 - **No human review gate** on auto-applied changes — by design, not an
   oversight; see "Classification & auto-apply" above.
-- New amendments/corrigenda are only caught if they change one of the two
-  fixed MeitY PDF URLs this pipeline watches, or if PIB publishes a
-  DPDP-relevant press release the same day it's checked. A notification
-  published only as a brand-new Gazette PDF, with no matching PIB release,
-  would not currently be detected automatically.
+- The document-discovery layer only watches MeitY notifications via
+  eGazette — PIB was investigated as a second discovery source and ruled
+  out (its feed holds only 20 items across every ministry, with no date on
+  each item, and no stable MeitY-only version of it could be found); MeitY's
+  own listing pages are blocked outright (see above). A DPDP-relevant
+  document published somewhere neither eGazette's ministry search nor these
+  four fixed sources would ever see could still be missed.

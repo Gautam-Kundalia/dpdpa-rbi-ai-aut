@@ -36,7 +36,14 @@ Source endpoints, and why:
     client-side by JS after page load, not by any request this pipeline
     can make. No stable GET-able endpoint found within the 45-minute
     time-box for this; not adding either page as a source rather than
-    guessing at one. See CHANGELOG for the full account.)
+    guessing at one. Revisited 30 Sep 2026 with a real headless browser
+    (Playwright, confirmed installable/working on this project's dev
+    machine) — both pages return HTTP 403 "Access Denied" even from a
+    completely standard Chrome fingerprint, i.e. a WAF blocking automated
+    browser traffic outright, not a missing-JavaScript problem. A genuine
+    block, not pursued further per this project's rule against trying to
+    get around one. See docs/detection_coverage_2026-09-30.md for the full
+    account and CHANGELOG for the original 23 Sep finding.)
   - eGazette (egazette.gov.in): confirmed reachable, but its real notification
     search (SearchMenu.aspx) is a session-scoped ASP.NET form (URLs carry a
     per-session "(S(...))" token, submission is postback+viewstate, no plain
@@ -46,7 +53,13 @@ Source endpoints, and why:
     (https://egazette.gov.in/) as a coarse "did anything change" signal.
     This is weaker than the other sources — flagged here and in the
     project brief as needing follow-up once a stable search endpoint is
-    confirmed.
+    confirmed. (30 Sep 2026: that follow-up happened, but not here — this
+    module still only hashes the home page for its own edit-detection job.
+    A separate module, src/discover_documents.py, now drives eGazette's
+    real "Search by Ministry" form with a headless browser to catch
+    brand-new documents — a different job from this module's "did one of
+    four known URLs change" check. See that module's docstring and
+    docs/detection_coverage_2026-09-30.md.)
 
 Usage:
     python src/fetch_sources.py          # run standalone, prints what changed

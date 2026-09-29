@@ -121,3 +121,4 @@ _(none yet)_
 |---|---|---|---|---|---|
 | 2026-09-28 | 0 (Cowork) | Created SPEC, CHECKPOINT, CLAUDE.md and session prompts. No code changed. | — | not committed | $0 |
 | 2026-09-29 | manual (Cowork) | Gautam finished reviewing everything. Set all 79 provisions to `Confirmed` and all 142 change-log rows to `Approved` (reviewer: Gautam Kundalia, date 2026-09-29), then rebuilt `data/DPDP_Rules_Tracker.xlsx` from the database. No legal text, summaries or source data changed. Closes decision D5. No code changed. | Not re-run for this change (data-only); the same 32 PDF-extraction tests fail before and after (see CHANGELOG) | commit on `main` | $0 |
+| 2026-09-30 | manual | Detection coverage: new-document discovery | tests | branch `detection-coverage-fix` | $0 |
