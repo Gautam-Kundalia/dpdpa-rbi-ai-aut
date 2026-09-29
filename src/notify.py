@@ -66,12 +66,29 @@ def _build_body(
     errors: list[str],
     sources_total: int = 0,
     sources_ok: int = 0,
+    new_documents: list[dict] | None = None,
+    baseline_notes: list[str] | None = None,
 ) -> tuple[str, str]:
     today = date.today().isoformat()
     reg_changes = _regulatory_changes(applied_changes)
     n = len(reg_changes)
+    new_documents = new_documents or []
+    baseline_notes = baseline_notes or []
 
-    if errors:
+    # A reader skimming only the subject line must not miss a newly
+    # discovered document — this was a past silent-failure bug for the
+    # error case (see CHANGELOG), so the same "the subject can't lie by
+    # omission" rule applies here: this prefix always wins over the
+    # ordinary subject wording below, whatever else happened this run.
+    if new_documents:
+        extra = []
+        if errors:
+            extra.append(f"{len(errors)} error(s)")
+        if n:
+            extra.append(f"{n} change{'s' if n != 1 else ''} applied")
+        suffix = f" — also {', '.join(extra)}" if extra else ""
+        subject = f"ACTION NEEDED — new DPDP-related document found ({today}){suffix}"
+    elif errors:
         subject = f"DPDP Monitor — {len(errors)} error(s) today ({today})" + (
             f", {n} change{'s' if n != 1 else ''} applied" if n else ""
         )
@@ -80,15 +97,33 @@ def _build_body(
     else:
         subject = f"DPDP Monitor — {n} change{'s' if n != 1 else ''} applied today ({today})"
 
+    lines: list[str] = []
+
+    if new_documents:
+        plural = "s" if len(new_documents) != 1 else ""
+        lines.append(f"{len(new_documents)} newly discovered document{plural}:\n")
+        for d in new_documents:
+            lines.append(f"  - {d.get('title') or d.get('url')}")
+            lines.append(f"    Source: {d.get('discovery_source')}")
+            if d.get("published_date"):
+                lines.append(f"    Date: {d['published_date']}")
+            lines.append(f"    Link: {d.get('url')}")
+            if d.get("unreadable"):
+                lines.append("    (This document could not be read — please check it by hand.)")
+            elif d.get("text_excerpt"):
+                lines.append(f"    Excerpt: {d['text_excerpt']}")
+            lines.append("")
+        lines.append("Nothing has been changed in the database — please review this document.\n")
+
     if errors:
         # Must not read "No changes were detected" on an error day — that
         # reads as "everything's fine" when it isn't. Say what was actually
         # checked instead.
-        lines = [f"{sources_ok} of {sources_total} source(s) checked successfully today."]
+        lines.append(f"{sources_ok} of {sources_total} source(s) checked successfully today.")
     elif n == 0:
-        lines = ["No regulatory changes were detected across PIB, MeitY, or eGazette today."]
+        lines.append("No regulatory changes were detected across PIB, MeitY, or eGazette today.")
     else:
-        lines = [f"{n} regulatory change{'s' if n != 1 else ''} applied today:\n"]
+        lines.append(f"{n} regulatory change{'s' if n != 1 else ''} applied today:\n")
 
     if n:
         for c in reg_changes:
@@ -110,6 +145,11 @@ def _build_body(
         )
         lines.append("Updated Word docs and Excel tracker are attached to this email.")
 
+    if baseline_notes:
+        lines.append("\nDocument discovery:")
+        for note in baseline_notes:
+            lines.append(f"  - {note}")
+
     lines.append("\n—\nDPDP Regulatory Change Monitor (automated, no human review gate)")
     return subject, "\n".join(lines)
 
@@ -130,6 +170,8 @@ def send_summary(
     errors: list[str] | None = None,
     sources_total: int = 0,
     sources_ok: int = 0,
+    new_documents: list[dict] | None = None,
+    baseline_notes: list[str] | None = None,
 ) -> None:
     errors = errors or []
     if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
@@ -137,7 +179,8 @@ def send_summary(
     if not NOTIFY_EMAIL:
         raise RuntimeError("NOTIFY_EMAIL not set (check .env / GitHub secrets)")
 
-    subject, body = _build_body(applied_changes, errors, sources_total, sources_ok)
+    subject, body = _build_body(applied_changes, errors, sources_total, sources_ok,
+                                 new_documents, baseline_notes)
 
     msg = EmailMessage()
     msg["Subject"] = subject
