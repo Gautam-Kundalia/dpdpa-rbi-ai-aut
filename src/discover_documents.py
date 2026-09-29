@@ -198,26 +198,33 @@ def _egazette_search_month(page, year: int, month_name: str) -> list[dict]:
     raw result rows. No CAPTCHA anywhere in this flow (confirmed by hand —
     see the findings doc); each dropdown pick reloads the page (ASP.NET
     postback), so each step waits for that navigation before the next."""
-    # "load" rather than "networkidle": networkidle demands 500ms of zero
-    # network activity, which a page with any ongoing background request
-    # (analytics, a polling widget) can fail to ever reach — "load" (the
-    # page's own resources finished loading) is what's actually needed
-    # before interacting with the form, and doesn't share that failure mode.
-    page.goto(f"{EGAZETTE_BASE}/", timeout=EGAZETTE_TIMEOUT_MS, wait_until="load")
+    # "commit" (not "load"/"networkidle"): waits only for the navigation's
+    # response to start arriving, not for every page resource to finish. A
+    # real production run still timed out at 60s waiting for "load", even
+    # though this exact URL is already fetched successfully every day by
+    # plain `requests` in fetch_sources.py — pointing at some slow or
+    # never-finishing sub-resource on the page (an ad, a widget, a font),
+    # not an unreachable site or connection. Every step after this waits
+    # for a SPECIFIC element it actually needs next, rather than a generic
+    # "page fully loaded" signal — Playwright's click()/select_option()
+    # already auto-wait for their own target element, so this sidesteps
+    # the slow-resource problem entirely instead of just giving it more time.
+    page.goto(f"{EGAZETTE_BASE}/", timeout=EGAZETTE_TIMEOUT_MS, wait_until="commit")
     page.click("text=Search", timeout=EGAZETTE_TIMEOUT_MS)
-    page.wait_for_load_state("load", timeout=EGAZETTE_TIMEOUT_MS)
     page.click("text=Search by Ministry", timeout=EGAZETTE_TIMEOUT_MS)
-    page.wait_for_load_state("load", timeout=EGAZETTE_TIMEOUT_MS)
+    page.wait_for_selector("#ddlMinistry", timeout=EGAZETTE_TIMEOUT_MS)
 
-    with page.expect_navigation(timeout=EGAZETTE_TIMEOUT_MS):
+    with page.expect_navigation(timeout=EGAZETTE_TIMEOUT_MS, wait_until="domcontentloaded"):
         page.select_option("#ddlMinistry", label=EGAZETTE_MINISTRY_LABEL)
-    with page.expect_navigation(timeout=EGAZETTE_TIMEOUT_MS):
+    with page.expect_navigation(timeout=EGAZETTE_TIMEOUT_MS, wait_until="domcontentloaded"):
         page.select_option("#ddlmonth", label=month_name)
-    with page.expect_navigation(timeout=EGAZETTE_TIMEOUT_MS):
+    with page.expect_navigation(timeout=EGAZETTE_TIMEOUT_MS, wait_until="domcontentloaded"):
         page.select_option("#ddlyear", label=str(year))
 
     page.click("#ImgSubmitDetails", timeout=EGAZETTE_TIMEOUT_MS)
-    page.wait_for_load_state("load", timeout=EGAZETTE_TIMEOUT_MS)
+    # Wait for the actual results label, not a generic load signal — this is
+    # the one DOM change that proves the postback's results rendered.
+    page.wait_for_selector("#lbl_Result", timeout=EGAZETTE_TIMEOUT_MS)
     page.wait_for_timeout(1000)
 
     return page.eval_on_selector_all(

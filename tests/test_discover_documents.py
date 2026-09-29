@@ -348,6 +348,14 @@ def test_email_unchanged_when_there_are_no_new_documents(monkeypatch):
 # --------------------------------------------------------------------------
 
 def test_schema_migration_adds_new_tables_without_touching_existing_data(tmp_path):
+    """
+    Uses a copy of the real committed database, but deliberately drops the
+    two new tables from the copy first rather than assuming the committed
+    db doesn't have them yet — it now legitimately does, since the daily
+    pipeline's own init_schema() call already upgraded the real db/dpdpa.db
+    in production. Dropping them here makes this test meaningful regardless
+    of that (and still proves nothing else gets touched).
+    """
     import shutil
 
     from db import DB_PATH, get_connection, init_schema
@@ -357,11 +365,9 @@ def test_schema_migration_adds_new_tables_without_touching_existing_data(tmp_pat
 
     connection = get_connection(copy_path)
     try:
-        tables_before = {
-            r["name"] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        }
-        assert "discovered_documents" not in tables_before
-        assert "discovery_run_log" not in tables_before
+        connection.execute("DROP TABLE IF EXISTS discovered_documents")
+        connection.execute("DROP TABLE IF EXISTS discovery_run_log")
+        connection.commit()
 
         counts_before = {
             table: connection.execute(f"SELECT COUNT(*) c FROM {table}").fetchone()["c"]
@@ -381,5 +387,18 @@ def test_schema_migration_adds_new_tables_without_touching_existing_data(tmp_pat
         assert "discovery_run_log" in tables_after
         for table in ("discovered_documents", "discovery_run_log"):
             assert connection.execute(f"SELECT COUNT(*) c FROM {table}").fetchone()["c"] == 0
+
+        # Idempotent even once the tables already have real rows — a second
+        # init_schema() call (exactly what happens every pipeline run) must
+        # never reset or drop what's already been discovered.
+        connection.execute(
+            "INSERT INTO discovered_documents (url, discovery_source, first_seen_date) "
+            "VALUES ('https://x.test/probe.pdf', 'probe', '2026-01-01')"
+        )
+        connection.commit()
+        init_schema(connection)
+        assert connection.execute(
+            "SELECT COUNT(*) c FROM discovered_documents WHERE url = 'https://x.test/probe.pdf'"
+        ).fetchone()["c"] == 1
     finally:
         connection.close()
