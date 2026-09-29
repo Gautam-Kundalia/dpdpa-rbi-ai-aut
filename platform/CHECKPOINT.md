@@ -102,7 +102,7 @@ Part B (on `platform-build`)
 | D2 | Hosting environment (likely EY Azure) | Build with Docker, runs anywhere; no deployment | Awaiting EY IT |
 | D3 | Can client documents go to an LLM via OpenRouter (ZDR)? | Only fictional data used; redaction on; `mock` default | Awaiting EY Risk |
 | D4 | Who at EY legal reviews obligations; pilot client | Obligations stay Draft (dev-publish only in `var/`) | Open |
-| D5 | Bulk-confirm the 79 baseline provisions | Script supports it; NOT run | Gautam runs it via the Approve-changes Action after reading the Act rebuild |
+| D5 | Bulk-confirm the 79 baseline provisions | **DONE 2026-09-29** — Gautam reviewed everything; all 79 provisions set to `Confirmed` and all 142 change-log rows to `Approved` directly in `db/dpdpa.db` (one-off SQL, not via the planned Approve-changes Action). Excel regenerated. | Closed. Session 1 Part A (`scripts/review.py`, Approve-changes Action) is still needed for FUTURE approvals. |
 | D6 | Commencement: 13 vs 14 Nov | `DEADLINE_DATES` default uses 13th | Open (legal question) |
 | D7 | Switch daily classifier from Anthropic to OpenRouter | Supported, default stays `anthropic` | Gautam decides |
 
@@ -120,3 +120,4 @@ _(none yet)_
 | Date | Session | What was done (plain words) | Tests | Commits / branch | AI spend |
 |---|---|---|---|---|---|
 | 2026-09-28 | 0 (Cowork) | Created SPEC, CHECKPOINT, CLAUDE.md and session prompts. No code changed. | — | not committed | $0 |
+| 2026-09-29 | manual (Cowork) | Gautam finished reviewing everything. Set all 79 provisions to `Confirmed` and all 142 change-log rows to `Approved` (reviewer: Gautam Kundalia, date 2026-09-29), then rebuilt `data/DPDP_Rules_Tracker.xlsx` from the database. No legal text, summaries or source data changed. Closes decision D5. No code changed. | Not re-run for this change (data-only); the same 32 PDF-extraction tests fail before and after (see CHANGELOG) | commit on `main` | $0 |

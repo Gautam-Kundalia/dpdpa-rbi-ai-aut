@@ -599,3 +599,47 @@ into 8 Claude Code sessions so no single conversation runs out of room:
   session rules, and a Resume prompt for sessions that stop part-way.
 
 Nothing runs until Gautam starts Session 1. Cost: $0.
+
+
+## 2026-09-29 — All reviewed items approved (data change only, no code changed)
+
+Gautam finished reviewing the pending approvals and confirmed everything is
+correct, so every "Pending Review" label was switched to approved.
+
+**What "approved" means here, in plain words:** each row in the database has a
+review label saying whether a human has checked it. Until today every row said
+"Pending Review" (nobody had signed off yet). Now they all say a person has
+checked them.
+
+- `provisions` table (the 79 Act sections, Rules and Schedules): `Pending
+  Review` -> **`Confirmed`** (79 rows). This table's allowed words are
+  Confirmed / Pending Review / Rejected — "Approved" is not one of them, so
+  `Confirmed` is its word for approved.
+- `change_log` table (the history of changes, 142 rows): `Pending Review` ->
+  **`Approved`** (142 rows). This table's allowed words include Approved.
+- On all 221 rows: `reviewed_by` = Gautam Kundalia, `review_date` = 2026-09-29.
+- `data/DPDP_Rules_Tracker.xlsx` was regenerated from the database with
+  `src/export_excel.py` (never hand-edited). Master_Provisions shows 79 x
+  Confirmed, Change_Log shows 142 x Approved. The Source_Log sheet also
+  refreshed, because the committed Excel was older than the database.
+- Not touched: legal text (`full_text`), summaries, `status`, `source_log`,
+  Word documents, all code and workflows. The Word documents do not show
+  review labels, so they were not regenerated.
+- Checked: database integrity check `ok`, no foreign-key problems, and a
+  cell-by-cell comparison old-vs-new Excel showed the only differences in
+  Master_Provisions/Change_Log are the Review_Status / Reviewed_By /
+  Review_Date columns.
+- Tests: 32 tests in `tests/test_legal_text_verbatim.py` fail (the check
+  that compares database text with a second PDF-reading tool) and they fail
+  identically on the database from before this change, so this change did not
+  cause them. Not investigated further today.
+- Things to know: (1) The README sheet in the Excel still says there is "no
+  human review gate" and that Review_Status only records the AI's confidence —
+  true of the automatic pipeline, but these rows now record a real human
+  review. Wording left as is (code change, out of scope today). (2) New
+  provisions/changes found by the daily run from now on will again start as
+  "Pending Review" for `provisions` rows (the pipeline still creates them that
+  way) — only what exists today was approved. (3) `apply_change.py` still
+  writes new change_log rows as `Approved` by `auto`.
+
+Cost: $0 — no API calls.
