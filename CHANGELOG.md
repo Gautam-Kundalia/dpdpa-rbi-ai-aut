@@ -541,3 +541,61 @@ tomorrow's scheduled run could still time out the same way.
 ### Cost
 
 $0 — a plain code edit, no API calls involved.
+
+## 2026-09-28 — Planning only: multi-client platform + approval-problem diagnosis (no code changed)
+
+No code, database or workflow was changed in this session. It diagnosed why
+approvals "keep coming back" and drafted a plan for turning this tracker into
+a multi-client DPDP compliance platform (FastAPI + SQLite + Next.js +
+OpenRouter).
+
+**Why approvals keep coming back (in plain words):**
+
+1. The Excel tracker is only an *output*. `export_excel.py` rebuilds it from
+   `db/dpdpa.db` every time; nothing ever reads edits made in the Excel back
+   into the database, so they vanish on the next export.
+2. There are two copies of the database — GitHub's (updated daily by the
+   bot) and the local one (updated only on `git pull`). SQLite is one binary
+   file, so Git cannot merge two edited copies; one overwrites the other.
+3. Every provision (79) and every change_log row (142) is still marked
+   `Pending Review`, so the "queue" never shrinks. The code itself has no
+   approval gate (`apply_change.py` marks changes `Approved` by `auto`).
+
+**Proposed interim fix (not yet done, awaiting go-ahead):** treat GitHub's
+copy as the master; add an "Approve changes" GitHub Action (manual run
+button) that updates GitHub's copy; give it and `daily-check.yml` the same
+`concurrency` group; stop committing `db/dpdpa.db` from this PC; make the
+Excel read-only; bulk-confirm the 79 baseline provisions once reviewed.
+
+**Long-term plan:** one EY-hosted server as the single master copy, GitHub
+for code only, pipeline moved into a FastAPI backend, a new obligations
+checklist layer, one SQLite file per client, Next.js dashboards, and an
+"alert first, score only after EY approval" model for law changes.
+
+Full plan: Claude Doc "DPDP Compliance Platform — Plan of Action" and the
+claude.ai Project log `logs/2026-09-28-client-platform-plan.md`.
+
+### Cost
+
+$0 — no API calls.
+
+## 2026-09-28 (later) — Build plan and Claude Code session prompts added (no code changed)
+
+Added the step-by-step build plan for the new multi-client platform, split
+into 8 Claude Code sessions so no single conversation runs out of room:
+
+- `CLAUDE.md` (repo root) — Claude Code reads this automatically every time.
+  It holds the ground rules: production is live, platform work goes on the
+  `platform-build` branch, never edit the live database there, no real client
+  data, explain everything in plain words.
+- `platform/SPEC.md` — the design to build to (architecture, databases,
+  approval flow, obligations, mapping, KPIs, deployment).
+- `platform/CHECKPOINT.md` — the progress tracker. Every session ticks tasks
+  here as it goes and writes the "Next action", so a new session knows exactly
+  where to pick up.
+- `platform/HOW_TO_RUN.md` — for Gautam: what to paste into Claude Code for
+  each session, and what only he/EY can do.
+- `platform/prompts/` — detailed instructions for Sessions 1–8, shared
+  session rules, and a Resume prompt for sessions that stop part-way.
+
+Nothing runs until Gautam starts Session 1. Cost: $0.
