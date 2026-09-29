@@ -87,6 +87,33 @@ CREATE TABLE IF NOT EXISTS source_snapshot (
 -- time. Deliberately not updated when classification fails, so a retried
 -- run diffs against the same known-good baseline as the failed run did.
 
+CREATE TABLE IF NOT EXISTS discovered_documents (
+    url               TEXT PRIMARY KEY,
+    discovery_source  TEXT NOT NULL,      -- e.g. 'egazette-meity'
+    title             TEXT,
+    published_date    TEXT,
+    first_seen_date   TEXT NOT NULL,      -- ISO date
+    is_baseline       INTEGER NOT NULL DEFAULT 0,   -- 1 = already listed when we first started watching
+    matched_keywords  TEXT,
+    text_excerpt      TEXT,               -- first ~600 chars, English only
+    alerted           INTEGER NOT NULL DEFAULT 0    -- 1 only after an email containing it was sent
+);
+-- Alert-only document discovery (30 Sep 2026): watches pages that LIST documents
+-- (as opposed to fetch_sources.py's fixed four URLs, which only notice edits to
+-- documents already known) and emails when a brand-new one appears. Never writes
+-- to provisions/change_log — a human decides what to apply. See
+-- src/discover_documents.py and docs/detection_coverage_2026-09-30.md.
+
+CREATE TABLE IF NOT EXISTS discovery_run_log (
+    discovery_source  TEXT NOT NULL,      -- may be a month-scoped bucket key, e.g.
+                                           -- 'egazette-meity:2026-09', for sources whose
+                                           -- listing is itself month-scoped — see
+                                           -- src/discover_documents.py's canary logic
+    run_date          TEXT NOT NULL,
+    items_found       INTEGER NOT NULL,
+    PRIMARY KEY (discovery_source, run_date)
+);
+
 CREATE INDEX IF NOT EXISTS idx_change_log_provision ON change_log(provision_id);
 CREATE INDEX IF NOT EXISTS idx_change_log_review_status ON change_log(review_status);
 CREATE INDEX IF NOT EXISTS idx_provisions_review_status ON provisions(review_status);

@@ -70,6 +70,7 @@ def test_classification_failure_restores_prior_hash_and_exits_1(conn, tmp_path):
     with patch.object(rp, "get_connection", lambda: db_module.get_connection(db_path)), \
          patch.object(rp, "fetch_all", return_value=[fr]), \
          patch.object(rp, "classify", side_effect=ClassificationFailed("simulated max_tokens")), \
+         patch.object(rp, "discover_all", return_value=([], [])), \
          patch.object(rp, "send_summary") as mock_notify:
         rc = rp.main()
 
@@ -98,6 +99,7 @@ def test_baseline_capture_is_not_an_error_and_makes_no_ai_call(conn, tmp_path):
     with patch.object(rp, "get_connection", lambda: db_module.get_connection(db_path)), \
          patch.object(rp, "fetch_all", return_value=[fr]), \
          patch.object(cc, "_call_claude") as mock_claude, \
+         patch.object(rp, "discover_all", return_value=([], [])), \
          patch.object(rp, "send_summary") as mock_notify:
         rc = rp.main()
 

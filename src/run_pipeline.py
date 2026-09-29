@@ -16,6 +16,7 @@ from datetime import date
 from apply_change import apply
 from classify_change import CLAUDE_MODEL, ClassificationFailed, classify
 from db import get_connection, init_schema
+from discover_documents import discover_all, mark_alerted
 from fetch_sources import fetch_all
 from notify import send_summary
 
@@ -76,6 +77,16 @@ def main() -> int:
             except Exception as exc:
                 errors.append(f"apply_change failed for {change.get('provision_id')}: {exc}")
 
+    new_documents: list[dict] = []
+    baseline_notes: list[str] = []
+    try:
+        new_documents, baseline_notes = discover_all(conn, errors)
+    except Exception as exc:
+        # A discovery failure must never stop the existing fetch -> classify
+        # -> apply flow — it's a separate, additive layer (see
+        # discover_documents.py). Surfaced here, not swallowed.
+        errors.append(f"document discovery failed unexpectedly: {exc}")
+
     today = date.today().isoformat()
     sources_total = conn.execute(
         "SELECT COUNT(*) c FROM source_log WHERE fetched_date = ?", (today,)
@@ -97,7 +108,16 @@ def main() -> int:
         print("[run_pipeline] no changes applied — skipping doc regeneration.")
 
     try:
-        send_summary(applied_changes, errors, sources_total, sources_ok)
+        send_summary(applied_changes, errors, sources_total, sources_ok,
+                      new_documents=new_documents, baseline_notes=baseline_notes)
+        if new_documents:
+            # Only mark alerted=1 once the email that contains them has
+            # actually been sent — if send_summary raised above, this line
+            # never runs, so a failed send is retried (re-alerted) next run
+            # instead of being silently marked as sent.
+            conn2 = get_connection()
+            mark_alerted(conn2, [d["url"] for d in new_documents])
+            conn2.close()
     except Exception as exc:
         print(f"[run_pipeline] WARNING: notify failed: {exc}")
         errors.append(f"notify failed: {exc}")
