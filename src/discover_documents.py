@@ -264,6 +264,21 @@ def fetch_egazette_meity(today: date | None = None) -> dict:
         browser = p.chromium.launch()
         try:
             page = browser.new_page(ignore_https_errors=True, user_agent=USER_AGENT)
+            # Block image/font/stylesheet/media requests outright: two real
+            # production runs hung waiting for a page to "settle" even with
+            # a minimal wait_until, right after the document itself had
+            # already committed — consistent with a slow-to-load,
+            # functionally irrelevant sub-resource (this page only needs to
+            # be readable for its text and form controls, not rendered
+            # visually). Standard resource-blocking, not a fingerprint or
+            # detection workaround — every other request type still goes
+            # through untouched.
+            page.route(
+                "**/*",
+                lambda route: route.abort()
+                if route.request.resource_type in ("image", "font", "stylesheet", "media")
+                else route.continue_(),
+            )
             for year, month_num, month_name in _current_and_previous_month(today):
                 bucket_key = f"egazette-meity:{year:04d}-{month_num:02d}"
                 rows = _egazette_search_month(page, year, month_name)
