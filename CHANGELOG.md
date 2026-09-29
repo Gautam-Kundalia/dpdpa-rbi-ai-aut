@@ -721,3 +721,66 @@ pass — 64 before this session, 76 after, zero new failures.
 **Cost:** $0 — no AI calls anywhere in this (keyword matching and reading
 PDF text with `pypdf`, same rule as the rest of this project's classifier
 input pipeline).
+
+## 2026-09-30 (later, same day) — Document discovery merged to `main`, then three real production timeouts fixed
+
+The work above was merged from `detection-coverage-fix` into `main` this evening
+(merge commit `522a0be`) after Gautam confirmed the tests passed on the merged
+result. What followed was the first time this new code actually ran on GitHub's
+real servers instead of Gautam's own PC — and it needed three rounds of real
+fixes before it worked cleanly. Recorded here in full, including what didn't
+work, because that's the honest account of what "worked locally" turned into in
+production. Full technical detail in the "Phase G" section added to
+`docs/detection_coverage_2026-09-30.md`.
+
+**Run 1 — timed out after 30 seconds** just loading eGazette's home page. Not
+a surprise in hindsight: this exact site was already known to be slow (its
+plain-HTTP timeout was raised 30s→60s back on 25 Sep for the same reason), just
+the new browser-based code hadn't been given the same allowance yet. Raised
+every wait in the new code to 60 seconds and switched to a less easily-stuck
+wait condition. Committed, pushed.
+
+**Run 2 — timed out again, still at the home page,** even with 60 seconds and
+the friendlier wait condition. The telling clue: this same page is fetched
+successfully every single day by a much simpler, older piece of this code
+(`fetch_sources.py`), in under a second — so the site and the connection were
+never the problem. The browser was waiting for the *entire* page (images, fonts,
+every last resource) to finish, which is a much higher bar than "can I read the
+page." Rewrote the waiting logic to only wait for the specific piece of the page
+each step actually needed next, instead of "is everything done." Committed,
+pushed.
+
+**Run 3 — timed out a third time,** now one step further into the process
+(clicking into the search form), for the same underlying reason as run 2: the
+browser was still quietly finishing loading something unrelated in the
+background. At this point — three failures being real evidence of a genuine
+pattern, not "just needs more patience" — two options were weighed before
+building either: replacing the browser entirely with simpler, direct web
+requests (investigated seriously — most of it works, but replicating this one
+government form's exact multi-step submission by hand ran into a dead end with
+no error detail available to debug against, so it wasn't pursued further this
+session), versus telling the browser to skip loading anything not actually
+needed (images, fonts, page styling — this code only ever reads text, never
+displays anything to look at). The second option was faster to build, verified
+correct against the real document list, and noticeably quicker too (about half
+the time). Committed, pushed.
+
+**Run 4 — worked completely.** Zero errors, all four existing sources checked
+successfully, and the new eGazette discovery step completed for the first
+time in production: `baseline captured for egazette-meity: 3 document(s)`.
+The daily automated document-discovery check is now genuinely running, not
+just tested.
+
+**One small, separate hiccup along the way, already resolved on its own:** on
+one run, the automated bot's own commit-back-to-GitHub step failed because
+Gautam's own manual `git push` happened to land at almost the same moment —
+a one-off timing collision, not a real problem (nothing was lost; worst case
+a source gets re-checked from scratch the next day instead of remembering it
+already checked it). Resolved itself the next time the workflow ran. Left as
+a known, low-priority rough edge rather than fixed today, since it never
+actually blocked anything.
+
+### Cost
+
+$0 — every fix here was plain code (timeouts, wait conditions, blocking a few
+resource types); no AI calls involved in diagnosing or fixing any of it.

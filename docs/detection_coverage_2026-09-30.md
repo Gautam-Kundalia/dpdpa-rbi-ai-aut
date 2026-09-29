@@ -286,3 +286,79 @@ this project, live or otherwise, has "found the corrigendum today," because toda
 real-world window doesn't reach December 2025. If this system had been running back
 in December 2025, proof 2 shows it would have listed the document, and proof 3 shows
 it would then have alerted on it.**
+
+---
+
+## Phase G — the first real GitHub Actions runs, and three real production failures
+
+Merged to `main` on 30 Sep 2026. Everything above was proven on Gautam's own Windows
+PC — the real GitHub Actions environment turned out to behave differently, in a way
+worth recording honestly since it took three attempts to actually fix.
+
+**Failure 1** (first-ever real daily run): `Page.goto: Timeout 30000ms exceeded`
+navigating to `https://egazette.gov.in/`. A 30-second timeout on a slow site — this
+project already knew eGazette was slow (`fetch_sources.py`'s plain-HTTP timeout was
+bumped 30s→60s back on 25 Sep for the same host), just hadn't applied that lesson to
+the new Playwright code yet. **Fix:** raised every timeout in the new eGazette flow to
+60s, and switched from `wait_until="networkidle"` (which needs 500ms of *zero* network
+activity — easy for a page with any background request to never satisfy) to `"load"`.
+
+**Failure 2** (second real run, after Fix 1): `Page.goto: Timeout 60000ms exceeded`,
+same URL, same wait condition — even 60 seconds of "load" wasn't enough. The
+discriminating fact: this exact URL is already fetched successfully **every single
+day** by a plain `requests.get()` call in `fetch_sources.py`, in well under a second,
+from this same GitHub Actions environment. So the connection and the site were never
+the problem — waiting for the browser's generic "everything on this page is fully
+loaded" signal was. **Fix:** stopped waiting for a page-wide signal at all. Switched to
+`wait_until="commit"` (only waits for the response to start arriving) and made every
+later step wait for the one specific DOM element it actually needed next (the ministry
+dropdown, the results label) — Playwright's `click()`/`select_option()` already do this
+automatically for their own target, so this removed the dependency on anything
+page-wide finishing.
+
+**Failure 3** (third real run, after Fix 2): `Page.click: Timeout 60000ms exceeded`
+clicking "Search by Ministry" — but the call log showed it was actually still stuck
+waiting for the *earlier* navigation to `default.aspx` to finish, not for the click's
+own target to appear. In plain words: the document itself had already arrived (Fix 2
+worked for that part), but the browser was still busy loading *something else* on that
+page in the background, and Playwright's own safety check for the next click was
+waiting for that unrelated background loading to settle first before proceeding.
+
+At this point, two different fixes were considered (both discussed with a second
+opinion before building either, given three failures in a row was enough to stop
+guessing blindly):
+
+- Drop the headless browser for this source entirely and replicate eGazette's form
+  submission with plain `requests` instead, since the same host's plain HTTP requests
+  were already proven reliable. **Investigated, not used**: `SearchMinistry.aspx`
+  turned out to need visiting `SearchMenu.aspx` first in the same session (a real,
+  confirmed, but shallow requirement — not a token to break, just a navigation-order
+  check) — but reconstructing the exact ASP.NET postback (all the hidden `__VIEWSTATE`
+  fields, in exactly the sequence the real dropdowns trigger) produced only a generic
+  "Runtime Error" with no diagnostic detail visible from outside the server. Chasing
+  that blind became its own open-ended reverse-engineering project rather than a
+  bounded fix, so it was abandoned in favour of the option below.
+- **Used:** block the page's image/font/stylesheet/media requests outright
+  (`page.route()`), since the page only needs to be *readable* by this code — its
+  visual rendering was never needed. This directly targets "browser is still busy
+  loading something in the background" without needing to know exactly which resource
+  was slow. Verified locally: same 5 real December-2025 results still returned
+  correctly, and **noticeably faster** (~9 seconds vs ~18 before) — real evidence
+  those blocked resources were adding meaningful, avoidable load time.
+
+**Result: the next real GitHub Actions run succeeded completely** — `4 of 4 source(s)
+checked successfully`, zero errors, and `baseline captured for egazette-meity: 3
+document(s)` in the email. The daily automated eGazette discovery run is now working
+end-to-end in production, not just locally.
+
+**A separate, minor, self-resolving issue seen along the way:** on one run, the bot's
+own commit-and-push step at the end failed with a `git push` rejection, because
+Gautam's own manual `git push` happened to land on `main` at almost the same moment.
+This is a plain timing race in the existing (pre-dating this work) commit step, which
+doesn't retry on a rejected push. Low-impact when it happens (worst case, the next
+day's run just re-baselines a source instead of losing anything — nothing is ever
+silently lost, since nothing had been marked `alerted=1` yet), and it self-resolved
+the moment the next run tried again. Making that commit step retry
+(`pull --rebase` + `push`, a couple of times) instead of failing outright on the first
+collision is a reasonable, low-effort follow-up if these races keep happening, but
+wasn't done as part of this session since it was never actually blocking.
