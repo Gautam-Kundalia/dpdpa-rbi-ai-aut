@@ -85,6 +85,15 @@ PDF_TIMEOUT = 60
 EGAZETTE_MINISTRY_LABEL = "Ministry of Electronics and Information Technology"
 EGAZETTE_BASE = "https://egazette.gov.in"
 
+# egazette.gov.in is a genuinely slow-loading site — fetch_sources.py already
+# bumped its own plain-HTTP timeout 30s -> 60s for this exact reason (see its
+# TIMEOUT constant). Confirmed the hard way here too: a real production run
+# on GitHub Actions timed out at the default 30s navigating to the home page,
+# even though the same steps ran in a few seconds locally — a slower or
+# colder network path from the CI runner, not a broken page. 60s mirrors
+# fetch_sources.py's own number rather than picking a new one.
+EGAZETTE_TIMEOUT_MS = 60_000
+
 # Case-insensitive; err on the side of too many alerts (a human reviews every
 # alert — nothing here writes to the tracked database on its own).
 KEYWORDS = [
@@ -189,21 +198,26 @@ def _egazette_search_month(page, year: int, month_name: str) -> list[dict]:
     raw result rows. No CAPTCHA anywhere in this flow (confirmed by hand —
     see the findings doc); each dropdown pick reloads the page (ASP.NET
     postback), so each step waits for that navigation before the next."""
-    page.goto(f"{EGAZETTE_BASE}/", timeout=30000, wait_until="networkidle")
-    page.click("text=Search", timeout=10000)
-    page.wait_for_load_state("networkidle")
-    page.click("text=Search by Ministry", timeout=10000)
-    page.wait_for_load_state("networkidle")
+    # "load" rather than "networkidle": networkidle demands 500ms of zero
+    # network activity, which a page with any ongoing background request
+    # (analytics, a polling widget) can fail to ever reach — "load" (the
+    # page's own resources finished loading) is what's actually needed
+    # before interacting with the form, and doesn't share that failure mode.
+    page.goto(f"{EGAZETTE_BASE}/", timeout=EGAZETTE_TIMEOUT_MS, wait_until="load")
+    page.click("text=Search", timeout=EGAZETTE_TIMEOUT_MS)
+    page.wait_for_load_state("load", timeout=EGAZETTE_TIMEOUT_MS)
+    page.click("text=Search by Ministry", timeout=EGAZETTE_TIMEOUT_MS)
+    page.wait_for_load_state("load", timeout=EGAZETTE_TIMEOUT_MS)
 
-    with page.expect_navigation(timeout=15000):
+    with page.expect_navigation(timeout=EGAZETTE_TIMEOUT_MS):
         page.select_option("#ddlMinistry", label=EGAZETTE_MINISTRY_LABEL)
-    with page.expect_navigation(timeout=15000):
+    with page.expect_navigation(timeout=EGAZETTE_TIMEOUT_MS):
         page.select_option("#ddlmonth", label=month_name)
-    with page.expect_navigation(timeout=15000):
+    with page.expect_navigation(timeout=EGAZETTE_TIMEOUT_MS):
         page.select_option("#ddlyear", label=str(year))
 
-    page.click("#ImgSubmitDetails")
-    page.wait_for_load_state("networkidle")
+    page.click("#ImgSubmitDetails", timeout=EGAZETTE_TIMEOUT_MS)
+    page.wait_for_load_state("load", timeout=EGAZETTE_TIMEOUT_MS)
     page.wait_for_timeout(1000)
 
     return page.eval_on_selector_all(
