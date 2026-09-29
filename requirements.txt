@@ -23,3 +23,13 @@ pytest==9.1.1
 # corrigendum/restoration scripts, where it loads fine.
 pdfplumber==0.11.10
 pymupdf==1.28.2
+# discover_documents.py's eGazette source: its "Search by Ministry" form is a
+# stateful multi-step ASP.NET form (each dropdown pick reloads the page), so
+# it's driven with a real, invisible Chrome browser rather than a plain HTTP
+# request. Confirmed installable and working (30 Sep 2026) — see
+# docs/detection_coverage_2026-09-30.md. The pip package alone is not
+# enough; the daily workflow also runs
+# `python -m playwright install --with-deps chromium` to fetch the browser
+# binary itself (a separate, larger download the pip package doesn't
+# include).
+playwright==1.63.0
