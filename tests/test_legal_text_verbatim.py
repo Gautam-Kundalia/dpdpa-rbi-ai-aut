@@ -372,8 +372,17 @@ _KNOWN_EXCEPTIONS: dict[str, list[tuple[str, str, str, str]]] = {
 ORDERED_RATIO_MIN = 0.995
 
 
-def _letters_only(text: str) -> str:
-    return re.sub(r"[^0-9A-Za-z]+", "", text)
+def _word_runs(text: str) -> list[str]:
+    """
+    The words in `text`, with all punctuation and spacing thrown away but every
+    word boundary kept: "Fund.-" and "Fund." both give ["Fund"], while
+    "six months" gives ["six", "months"] and "sixmonths" gives ["sixmonths"].
+
+    Keeping the boundaries is the whole point. Simply deleting punctuation and
+    comparing the result would treat "six months" and "sixmonths" as identical,
+    which would let a deleted space — or any regrouping of words — through.
+    """
+    return re.findall(r"[0-9A-Za-z]+", text)
 
 
 def _ordered_match(needle: str, haystack: str) -> tuple[bool, float, str | None]:
@@ -383,10 +392,11 @@ def _ordered_match(needle: str, haystack: str) -> tuple[bool, float, str | None]
 
     Two independent gates, both of which must pass:
 
-    1. **Word order.** Align the two word-by-word and require every
-       difference to vanish once punctuation is stripped. This is the gate
-       that catches a changed meaning: "shall" -> "may", "six months" ->
-       "six years", or a dropped clause, at any passage length.
+    1. **Word order.** Align the two word-by-word and require every difference
+       to vanish once punctuation and spacing are ignored, WITHOUT losing word
+       boundaries (see _word_runs). This is the gate that catches a changed
+       meaning — "shall" -> "may", "six months" -> "six years", a dropped
+       clause, two words swapped, a deleted space — at any passage length.
     2. **Ordered similarity >= 99.5%** against the closest region of the PDF,
        as a backstop against a match that has drifted.
 
@@ -426,14 +436,19 @@ def _ordered_match(needle: str, haystack: str) -> tuple[bool, float, str | None]
             continue
         pdf_part = " ".join(pdf_words[i1:i2])
         db_part = " ".join(db_words[j1:j2])
-        if _letters_only(pdf_part) != _letters_only(db_part):
+        if _word_runs(pdf_part) != _word_runs(db_part):
             return (
                 False, 0.0,
                 f"word difference — the PDF has {pdf_part[:90]!r} where the database "
                 f"has {db_part[:90]!r}",
             )
 
-    tight_region = " ".join(pdf_words[ops[0][1]:ops[-1][2]])
+    # The ordered-similarity backstop is measured against the span of the PDF
+    # the piece actually aligns to, not the padded region — otherwise the
+    # padding alone would push a perfectly good piece under the threshold.
+    # `lo` skips any leading context that was not stripped above.
+    lo = ops[0][1] if ops[0][0] != "delete" or ops[0][3] != 0 else ops[0][2]
+    tight_region = " ".join(pdf_words[lo:ops[-1][2]])
     ratio = difflib.SequenceMatcher(None, tight_region, needle, autojunk=False).ratio()
     if ratio < ORDERED_RATIO_MIN:
         return (
@@ -601,6 +616,64 @@ def test_rules_check_fails_on_a_meaning_changing_word_swap(
     assert errors != [], (
         f"the guard PASSED {provision_id} with {find!r} changed to {replace_with!r} — "
         "a meaning-changing word swap is exactly what it must catch"
+    )
+
+
+def test_a_deleted_space_is_caught(rules_pdf_text):
+    """
+    NEGATIVE test for the word-boundary hole. Deleting a space merges two words
+    into one. If the guard only compared "the letters with punctuation removed",
+    this would pass — the letters are identical.
+    """
+    stored = dict(_rules_provisions())["DPDPR-R19"]
+    assert "six months" in stored
+    mutated = stored.replace("six months", "sixmonths", 1)
+    assert check_rules_provision("DPDPR-R19", mutated, rules_pdf_text) != []
+
+
+def test_two_words_swapped_round_is_caught(rules_pdf_text):
+    """NEGATIVE test: reordering words must be caught, not just changing them."""
+    stored = dict(_rules_provisions())["DPDPR-R19"]
+    assert "the quorum for its meetings" in stored
+    mutated = stored.replace("the quorum for its meetings", "the quorum its for meetings", 1)
+    assert check_rules_provision("DPDPR-R19", mutated, rules_pdf_text) != []
+
+
+def test_the_ordered_fallback_accepts_punctuation_only_noise():
+    """
+    Directly exercises the fallback path. Today every known difference is an
+    explicit reviewed exception, so nothing in the real database reaches this
+    code — which is exactly why it needs its own test rather than being dead
+    code nobody notices is broken.
+    """
+    haystack = ("some earlier text 1. Salary.- (1) The Chairperson shall be entitled to "
+                "receive a consolidated salary of rupees four lakh fifty thousand per month. "
+                "some later text")
+    # The stored form drops the Gazette's separator dash — punctuation only.
+    needle = ("1. Salary. (1) The Chairperson shall be entitled to receive a consolidated "
+              "salary of rupees four lakh fifty thousand per month.")
+    ok, ratio, reason = _ordered_match(needle, haystack)
+    assert ok, f"punctuation-only difference was rejected: {reason} (ratio {ratio})"
+
+
+def test_the_ordered_fallback_rejects_a_word_swap_in_a_long_passage():
+    """
+    The reason the word-order gate exists rather than a similarity ratio alone:
+    at this length a single swapped word still scores well above 99.5%.
+    """
+    filler = "and the said provisions shall apply accordingly in every such case. " * 20
+    haystack = "preamble " + filler + "the Chairperson shall be entitled to receive it. tail"
+    needle = filler + "the Chairperson may be entitled to receive it."
+    ok, ratio, reason = _ordered_match(needle, haystack)
+    assert not ok, f"a shall->may swap passed with ratio {ratio:.5f}"
+    assert "word difference" in (reason or "")
+    # And prove the ratio alone would have waved it through.
+    plain_ratio = difflib.SequenceMatcher(
+        None, haystack[len("preamble "):len("preamble ") + len(needle)], needle, autojunk=False
+    ).ratio()
+    assert plain_ratio > ORDERED_RATIO_MIN, (
+        f"the point of this test is that similarity alone is not enough; it scored "
+        f"{plain_ratio:.5f}"
     )
 
 
