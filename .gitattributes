@@ -1,0 +1,3 @@
+# Certificate files must never have their line endings rewritten — git
+# converting LF to CRLF on Windows checkouts would change their bytes.
+*.pem -text
