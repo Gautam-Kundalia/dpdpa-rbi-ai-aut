@@ -27,13 +27,20 @@ def main() -> int:
 
     applied_changes: list[dict] = []
     errors: list[str] = []
+    # Two softer channels than `errors`, both of which end up in the email:
+    #   baseline_notes — "this is the first time we have seen X" (normal)
+    #   alerts         — "a human should go and look at this" (not an error,
+    #                    but not nothing either). See notify.send_summary.
+    baseline_notes: list[str] = []
+    alerts: list[str] = []
 
     changed_sources = fetch_all(conn, fetch_errors=errors)
     print(f"[run_pipeline] {len(changed_sources)} source(s) changed.")
 
     for fetch_result in changed_sources:
         try:
-            classified = classify(fetch_result, conn)
+            classified = classify(fetch_result, conn, baseline_notes=baseline_notes,
+                                   alerts=alerts, errors=errors)
         except Exception as exc:
             if isinstance(exc, ClassificationFailed):
                 errors.append(str(exc))
@@ -78,9 +85,9 @@ def main() -> int:
                 errors.append(f"apply_change failed for {change.get('provision_id')}: {exc}")
 
     new_documents: list[dict] = []
-    baseline_notes: list[str] = []
     try:
-        new_documents, baseline_notes = discover_all(conn, errors)
+        new_documents, discovery_baseline_notes = discover_all(conn, errors)
+        baseline_notes.extend(discovery_baseline_notes)
     except Exception as exc:
         # A discovery failure must never stop the existing fetch -> classify
         # -> apply flow — it's a separate, additive layer (see
@@ -109,7 +116,8 @@ def main() -> int:
 
     try:
         send_summary(applied_changes, errors, sources_total, sources_ok,
-                      new_documents=new_documents, baseline_notes=baseline_notes)
+                      new_documents=new_documents, baseline_notes=baseline_notes,
+                      source_alerts=alerts)
         if new_documents:
             # Only mark alerted=1 once the email that contains them has
             # actually been sent — if send_summary raised above, this line

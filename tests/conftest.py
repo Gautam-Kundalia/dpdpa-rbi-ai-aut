@@ -67,7 +67,10 @@ def seed_source_log(conn, **overrides):
         "document_id": "SRC-0099",
         "source": "MeitY",
         "title": "test source",
-        "url": "http://example.test/doc.pdf",
+        # The official MeitY Rules PDF — the only source allowed to change a
+        # DPDPR-* row under the source-authority rule (audit C-4). Tests that
+        # want an UNauthorised source pass url= explicitly.
+        "url": "https://www.meity.gov.in/static/uploads/2025/11/53450e6e5dc0bfa85ebd78686cadad39.pdf",
         "published_date": "2026-09-23",
         "fetched_date": "2026-09-23",
         "content_hash": "h1",
@@ -88,7 +91,8 @@ class FakeFetchResult:
     need the real dataclass (avoids importing requests/bs4/pypdf machinery
     where it's not needed)."""
 
-    def __init__(self, *, source="MeitY", title="test", url="http://example.test/doc.pdf",
+    def __init__(self, *, source="MeitY", title="test",
+                 url="https://www.meity.gov.in/static/uploads/2025/11/53450e6e5dc0bfa85ebd78686cadad39.pdf",
                  document_id="SRC-0099", content_text="", content_hash="h1",
                  changed=True, prior_hash=None):
         self.source = source

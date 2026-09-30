@@ -3,8 +3,15 @@ Fetch current content from the three DPDP sources (PIB, MeitY, eGazette),
 hash it, and compare against the last-seen hash in source_log to detect
 change. Downstream (classify_change.py) only runs on sources that changed.
 
-Trust order: PIB (early-warning trigger) -> MeitY (working copy) ->
-eGazette (authoritative confirmation).
+Trust order (corrected 30 Sep 2026, audit finding C-4). Only the official
+MeitY PDF of an instrument may change that instrument stored text:
+  - MeitY DPDP Rules PDF  -> may amend DPDPR-* rows
+  - MeitY DPDP Act PDF    -> may amend DPDPA-* rows
+  - PIB RSS               -> ALERT ONLY, never an applied change, no AI call
+  - eGazette home page    -> RETIRED, no longer fetched here at all
+The earlier wording called the eGazette home page "authoritative
+confirmation". It was never that: it is a rotating list of truncated subject
+lines from every ministry. See MAY_AMEND_RULES below.
 
 Source endpoints, and why:
   - PIB: https://www.pib.gov.in/RssMain.aspx?ModId=6&Mid=0&reg=3&lang=1 —
@@ -88,32 +95,115 @@ USER_AGENT = "Mozilla/5.0 (compatible; DPDPAChangeMonitor/1.0)"
 # blind increase.
 TIMEOUT = 60
 
+# ==========================================================================
+# WHICH SOURCE IS ALLOWED TO CHANGE WHICH LAW  (audit finding C-4)
+# ==========================================================================
+# "may_amend" lists the provision_id prefixes a source is permitted to change.
+# An empty list means the source can never produce an applied change at all —
+# it can only raise an alert for a human to look at.
+#
+# Why this exists: the two verbatim checks in classify_change.py require
+# new_full_text to appear in the FETCHED CONTENT. That is exactly the text
+# whoever controls the page controls. So before 30 Sep 2026, any watched page
+# that happened to carry something shaped like an amendment notice could have
+# its wording written into the legal text — the audit demonstrated this
+# end-to-end with the real production model, using a forged notice appended to
+# the e-Gazette home page. The model behaved correctly; the system simply had
+# no way to tell a real Gazette notification from text that merely appears on
+# a Gazette web page.
+#
+# The rule is deliberately narrow and fails CLOSED: a URL that is not listed
+# here gets an empty list, so anything added in future is alert-only until
+# somebody deliberately grants it authority. It is enforced twice — in
+# classify_change.classify() and again in apply_change.apply() — so a mistake
+# in one place cannot undo the other.
+MAY_AMEND_RULES = ["DPDPR-"]    # the DPDP Rules, 2025
+MAY_AMEND_ACT = ["DPDPA-"]      # the DPDP Act, 2023
+ALERT_ONLY: list[str] = []      # can never change stored legal text
+
 SOURCES = [
     {
         "source": "PIB",
         "title": "PIB — All Press Releases RSS (English, national)",
         "url": "https://www.pib.gov.in/RssMain.aspx?ModId=6&Mid=0&reg=3&lang=1",
         "kind": "rss",
+        # A press release is not a legal instrument. PIB is a coincidence
+        # detector: it can say that something DPDP-shaped happened, never what
+        # the law now says. Alert-only, and no AI call at all — see
+        # classify_change.classify().
+        "may_amend": ALERT_ONLY,
     },
     {
         "source": "MeitY",
         "title": "DPDP Rules, 2025 — MeitY PDF (G.S.R. 846(E))",
         "url": "https://www.meity.gov.in/static/uploads/2025/11/53450e6e5dc0bfa85ebd78686cadad39.pdf",
         "kind": "pdf",
+        "may_amend": MAY_AMEND_RULES,
     },
     {
         "source": "MeitY",
         "title": "DPDP Act, 2023 — MeitY PDF",
         "url": "https://www.meity.gov.in/static/uploads/2024/06/2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf",
         "kind": "pdf",
-    },
-    {
-        "source": "eGazette",
-        "title": "eGazette — Home (best-effort; no stable search endpoint confirmed)",
-        "url": "https://egazette.gov.in/",
-        "kind": "html",
+        "may_amend": MAY_AMEND_ACT,
     },
 ]
+
+# Retired 30 Sep 2026 (audit findings C-4 and M-4). The e-Gazette home page is
+# no longer fetched or classified here. Reasons, in order of weight:
+#   1. Its content could reach provisions.full_text, and it is the one source
+#      whose TLS certificate this code could not verify (see _fetch_raw).
+#   2. It changed on 20 of 23 recorded production runs and produced a real
+#      change on none of them — a 100% false-positive rate that also cost an
+#      AI call every single day.
+#   3. Its real job — noticing a brand-new Gazette document — is now done
+#      properly by src/discover_documents.py, which drives e-Gazette own
+#      "Search by Ministry" form and only ever raises an alert.
+# The row stays in source_log (it carries linked_change_ids history); the
+# one-off script scripts/mark_unwatched_sources_2026-09-30.py sets its
+# watched flag to 0 so it stops appearing as "being watched right now".
+RETIRED_SOURCES = [
+    {
+        "source": "eGazette",
+        "title": "eGazette — Home (RETIRED 30 Sep 2026; replaced by discover_documents.py)",
+        "url": "https://egazette.gov.in/",
+        "kind": "html",
+        "may_amend": ALERT_ONLY,
+    },
+]
+
+# Everything this project has ever watched, for authority lookups only. Never
+# iterated for fetching — only SOURCES is.
+ALL_KNOWN_SOURCES = SOURCES + RETIRED_SOURCES
+
+
+def may_amend(url: str) -> list[str]:
+    """
+    Which provision_id prefixes the source at `url` is allowed to change.
+    Fails closed: an unknown URL gets an empty list, i.e. alert-only.
+    """
+    for src in ALL_KNOWN_SOURCES:
+        if src["url"] == url:
+            return list(src.get("may_amend") or [])
+    return []
+
+
+def is_authorised(url: str, provision_id: str) -> bool:
+    """True only if the source at `url` may change `provision_id`."""
+    return any((provision_id or "").startswith(prefix) for prefix in may_amend(url))
+
+
+def authority_refusal(url: str, source: str, provision_id: str) -> str:
+    """The one plain-language sentence used wherever a refusal is reported."""
+    allowed = may_amend(url)
+    allowed_text = ", ".join(f"{prefix}*" for prefix in allowed) if allowed else "nothing at all"
+    return (
+        f"REFUSED: {source} ({url}) is not allowed to change {provision_id}. "
+        f"That source may change {allowed_text}. This is the source-authority rule "
+        f"(audit finding C-4): a change is only trusted when it comes from the official "
+        f"document for that instrument, not from any page that happens to mention it. "
+        f"Nothing was written. Please check the source by hand."
+    )
 
 
 @dataclass
@@ -149,18 +239,17 @@ def _extract_text(raw: bytes, kind: str) -> str:
 
 
 def _fetch_raw(url: str) -> bytes:
-    # egazette.gov.in serves a cert chain that Windows trusts (via its own
-    # cert store) but that certifi's CA bundle does not — verified by hand
-    # via a raw TLS handshake (hostname matches, no MITM indication). It's
-    # public, read-only gazette content with no credentials involved, so we
-    # skip verification for this one known-problematic host rather than
-    # weakening TLS checks for every source.
-    verify = "egazette.gov.in" not in url
-    if not verify:
-        import urllib3
-
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, verify=verify)
+    # TLS certificate checking is ON for every source here, with no exception
+    # (audit finding C-4). Until 30 Sep 2026 this function passed
+    # verify=False for egazette.gov.in, whose certificate chains to a root
+    # Windows trusts but the certifi bundle does not. That was the one source
+    # whose text could reach provisions.full_text without being
+    # authenticated. It is no longer fetched here at all (see
+    # RETIRED_SOURCES), so the exception is simply gone. If a future source
+    # has the same certificate problem, supply the missing root CA
+    # explicitly — verify="certs/<name>.pem" — rather than switching
+    # verification off.
+    resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT)
     resp.raise_for_status()
     return resp.content
 
@@ -172,11 +261,22 @@ def _existing_row(conn, url: str):
 
 
 def _upsert_source_log(conn, *, url, source, title, published_date, fetched_date,
-                        content_hash, processing_status) -> str:
+                        content_hash, processing_status, content_text=None) -> str:
     """
     source_log.url is UNIQUE (one row per source URL, not a per-fetch
     history) — update the existing row for this URL if there is one,
     otherwise insert a new one.
+
+    When a row is INSERTED for the first time and we have the text in hand,
+    the matching source_snapshot row is written in the same step (audit
+    finding C-3). A "snapshot" is simply the text as we last saw it, and it
+    is what classify_change.py diffs the next fetch against. Before this
+    fix, the snapshot was only created the first time a source's content
+    CHANGED — and because classify_change.py treats "no snapshot" as "first
+    sighting, store it and report nothing", the first real change to a
+    source added to source_log outside a classify() run was stored as the
+    new baseline and never reported. SRC-0001 (the DPDP Rules PDF) was in
+    exactly that state, so its next amendment was guaranteed to be lost.
     """
     existing = _existing_row(conn, url)
     if existing:
@@ -197,6 +297,17 @@ def _upsert_source_log(conn, *, url, source, title, published_date, fetched_date
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
             (doc_id, source, title, url, published_date, fetched_date, content_hash, processing_status),
         )
+        if content_text is not None:
+            # Same transaction as the INSERT above, so a source can never
+            # exist in source_log without a diff baseline. Not written on the
+            # fetch-failure path, where content_text is None (there is no
+            # text to snapshot, and pretending otherwise would bake a
+            # failure in as the baseline).
+            conn.execute(
+                "INSERT INTO source_snapshot (document_id, content_hash, content_text, fetched_date) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(document_id) DO NOTHING",
+                (doc_id, content_hash, content_text, fetched_date),
+            )
     conn.commit()
     return doc_id
 
@@ -259,6 +370,7 @@ def fetch_all(conn=None, fetch_errors: list[str] | None = None) -> list[FetchRes
             published_date=None, fetched_date=today,
             content_hash=content_hash,
             processing_status="New" if is_changed else "No Change Detected",
+            content_text=text,
         )
 
         if is_changed:

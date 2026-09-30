@@ -44,6 +44,52 @@ def test_download_error_keeps_last_good_hash_and_reports_it(conn):
     ).fetchone()
     assert row["content_hash"] == "GOODHASH123", "must not blank the last good hash on failure"
     assert row["processing_status"] == "Error"
+    # A failed fetch has no text, so it must not write a baseline either —
+    # baking a failure in as "what the source said" would be worse than having
+    # no baseline at all (audit C-3).
+    assert conn.execute("SELECT COUNT(*) c FROM source_snapshot").fetchone()["c"] == 0
+
+
+def test_every_source_log_row_gets_a_baseline_when_it_is_created(conn):
+    """
+    Audit finding C-3, the invariant. A "baseline" (source_snapshot row) is the
+    text as we last saw it; classify_change.py diffs the next fetch against it.
+    Before 30 Sep 2026 it was only created the first time a source CHANGED, so
+    a source could sit in source_log for weeks with no baseline — and then have
+    its first real change stored as the baseline and never reported. SRC-0001,
+    the DPDP Rules PDF, was in exactly that state.
+    """
+    with patch.object(fs, "_fetch_raw", return_value=b"<html><body>hello</body></html>"), \
+         patch.object(fs, "_extract_text", side_effect=lambda raw, kind: f"text for {kind}"):
+        changed = fs.fetch_all(conn)
+
+    assert len(changed) == len(fs.SOURCES), "every source is new, so every source changed"
+    log_ids = {r["document_id"] for r in conn.execute("SELECT document_id FROM source_log")}
+    snap_ids = {r["document_id"] for r in conn.execute("SELECT document_id FROM source_snapshot")}
+    assert log_ids == snap_ids, (
+        f"every watched source must have a baseline; missing: {sorted(log_ids - snap_ids)}"
+    )
+    row = conn.execute(
+        "SELECT content_text FROM source_snapshot WHERE document_id = ?", (sorted(log_ids)[0],)
+    ).fetchone()
+    assert row["content_text"], "the baseline must hold the actual text, not an empty string"
+
+
+def test_a_second_fetch_does_not_overwrite_the_baseline(conn):
+    """
+    The baseline must only move forward when classify_change.py says so (after
+    a successful classification). fetch_all must never quietly advance it, or a
+    change would be diffed away before anyone looked at it.
+    """
+    with patch.object(fs, "_fetch_raw", return_value=b"first"), \
+         patch.object(fs, "_extract_text", side_effect=lambda raw, kind: "first text"):
+        fs.fetch_all(conn)
+    with patch.object(fs, "_fetch_raw", return_value=b"second"), \
+         patch.object(fs, "_extract_text", side_effect=lambda raw, kind: "second text"):
+        fs.fetch_all(conn)
+
+    texts = {r["content_text"] for r in conn.execute("SELECT content_text FROM source_snapshot")}
+    assert texts == {"first text"}, "fetch_all must not advance the baseline on a later fetch"
 
 
 def test_download_error_without_fetch_errors_list_still_works(conn):
@@ -84,9 +130,14 @@ def test_classification_failure_restores_prior_hash_and_exits_1(conn, tmp_path):
     assert any("simulated max_tokens" in e for e in errors_arg)
 
 
-def test_baseline_capture_is_not_an_error_and_makes_no_ai_call(conn, tmp_path):
-    """First-ever check of a source (no snapshot yet): store one, report
-    'baseline captured', exit 0, and never touch the Claude API."""
+def test_first_sighting_stores_a_baseline_makes_no_ai_call_and_says_so(conn, tmp_path):
+    """
+    Case (i) of audit finding C-3: genuinely the FIRST time this source has
+    been fetched (no prior fingerprint). Storing today's text as the baseline
+    is right — there is nothing to compare against — but it must be REPORTED,
+    or a day on which the tool learnt something for the first time reads
+    exactly like a quiet day. Exit 0, no Claude call, and a note in the email.
+    """
     seed_source_log(conn, document_id="SRC-0001", url="http://x/2025/11/y.pdf",
                      content_hash="h1", processing_status="New")
     conn.close()
@@ -108,6 +159,58 @@ def test_baseline_capture_is_not_an_error_and_makes_no_ai_call(conn, tmp_path):
     applied, errors = mock_notify.call_args[0][0], mock_notify.call_args[0][1]
     assert applied == []
     assert errors == []
+    notes = mock_notify.call_args.kwargs["baseline_notes"]
+    assert any("first check of MeitY" in n and "SRC-0001" in n for n in notes), notes
+
+    # And the email actually prints it.
+    from notify import _build_body
+    _subject, body = _build_body([], [], 1, 1, baseline_notes=notes)
+    assert "first check of MeitY" in body
+    assert "Baselines captured" in body
+
+
+def test_a_source_with_history_but_no_baseline_is_a_loud_error(conn, tmp_path):
+    """
+    Case (ii) of audit finding C-3, and the one that mattered: the source has
+    been fetched before (source_log holds a prior fingerprint) but has no
+    baseline text. Storing today's text as "the baseline" would swallow the
+    very change that triggered the run — which is exactly what would have
+    happened to the next amendment of the DPDP Rules.
+
+    Required behaviour: raise, report, and put the old fingerprint back so the
+    source is retried tomorrow instead of written off.
+    """
+    seed_source_log(conn, document_id="SRC-0001", url="http://x/2025/11/y.pdf",
+                     content_hash="NEWHASH", processing_status="New")
+    conn.close()
+
+    db_path = tmp_path / "test.db"
+    fr = FakeFetchResult(source="MeitY", document_id="SRC-0001", url="http://x/2025/11/y.pdf",
+                          content_text="Rule 1. Short title. Twelve months instead of eighteen.",
+                          content_hash="NEWHASH", prior_hash="OLDHASH")
+
+    import db as db_module
+    with patch.object(rp, "get_connection", lambda: db_module.get_connection(db_path)), \
+         patch.object(rp, "fetch_all", return_value=[fr]), \
+         patch.object(cc, "_call_claude") as mock_claude, \
+         patch.object(rp, "discover_all", return_value=([], [])), \
+         patch.object(rp, "send_summary") as mock_notify:
+        rc = rp.main()
+
+    assert rc == 1, "this must not be reported as a clean run"
+    mock_claude.assert_not_called()
+    errors = mock_notify.call_args[0][1]
+    assert any("no baseline for SRC-0001" in e for e in errors), errors
+    assert any("backfill_source_snapshots" in e for e in errors), \
+        "the error must say what to run to fix it"
+
+    conn2 = db_module.get_connection(db_path)
+    assert conn2.execute(
+        "SELECT content_hash FROM source_log WHERE document_id = 'SRC-0001'"
+    ).fetchone()["content_hash"] == "OLDHASH", "the fingerprint must roll back so tomorrow retries"
+    assert conn2.execute("SELECT COUNT(*) c FROM source_snapshot").fetchone()["c"] == 0, \
+        "today's text must NOT have been stored as the baseline"
+    conn2.close()
 
 
 # --------------------------------------------------------------------------
@@ -169,9 +272,18 @@ def test_validate_accepts_a_genuine_matching_change():
 # apply_change.py: span replacement, refusal on 0/2+ matches
 # --------------------------------------------------------------------------
 
-def _fr(document_id="SRC-0099"):
+# The URL matters now: apply() refuses a change from a source that is not
+# allowed to make it (audit C-4). The official MeitY Rules PDF is the only
+# source allowed to change a DPDPR-* row, so that is what these tests use.
+RULES_PDF_URL = fs.SOURCES[1]["url"]
+PIB_URL = fs.SOURCES[0]["url"]
+EGAZETTE_HOME_URL = fs.RETIRED_SOURCES[0]["url"]
+
+
+def _fr(document_id="SRC-0099", url=None, source="MeitY"):
     from types import SimpleNamespace
-    return SimpleNamespace(document_id=document_id, title="test", url="http://x")
+    return SimpleNamespace(document_id=document_id, title="test",
+                            url=url or RULES_PDF_URL, source=source)
 
 
 def test_apply_change_replaces_only_the_matching_span(conn):

@@ -68,12 +68,17 @@ def _build_body(
     sources_ok: int = 0,
     new_documents: list[dict] | None = None,
     baseline_notes: list[str] | None = None,
+    source_alerts: list[str] | None = None,
 ) -> tuple[str, str]:
     today = date.today().isoformat()
     reg_changes = _regulatory_changes(applied_changes)
     n = len(reg_changes)
     new_documents = new_documents or []
     baseline_notes = baseline_notes or []
+    # Things a human should look at that are not errors and not applied
+    # changes — today that means a DPDP-shaped PIB press-release title
+    # (PIB is alert-only; see fetch_sources.MAY_AMEND_RULES, audit C-4).
+    source_alerts = source_alerts or []
 
     # A reader skimming only the subject line must not miss a newly
     # discovered document — this was a past silent-failure bug for the
@@ -88,6 +93,16 @@ def _build_body(
             extra.append(f"{n} change{'s' if n != 1 else ''} applied")
         suffix = f" — also {', '.join(extra)}" if extra else ""
         subject = f"ACTION NEEDED — new DPDP-related document found ({today}){suffix}"
+    elif source_alerts:
+        # Same rule as above: the subject line must not say "no changes" on a
+        # day something worth reading happened.
+        extra = []
+        if errors:
+            extra.append(f"{len(errors)} error(s)")
+        if n:
+            extra.append(f"{n} change{'s' if n != 1 else ''} applied")
+        suffix = f" — also {', '.join(extra)}" if extra else ""
+        subject = f"ALERT — a watched source mentions data protection ({today}){suffix}"
     elif errors:
         subject = f"DPDP Monitor — {len(errors)} error(s) today ({today})" + (
             f", {n} change{'s' if n != 1 else ''} applied" if n else ""
@@ -114,6 +129,15 @@ def _build_body(
                 lines.append(f"    Excerpt: {d['text_excerpt']}")
             lines.append("")
         lines.append("Nothing has been changed in the database — please review this document.\n")
+
+    if source_alerts:
+        plural = "s" if len(source_alerts) != 1 else ""
+        lines.append(f"{len(source_alerts)} alert{plural} from the watched sources:\n")
+        for alert in source_alerts:
+            lines.append(f"  - {alert}")
+        lines.append("")
+        lines.append("Nothing has been changed in the database for these — they are "
+                      "for information only.\n")
 
     if errors:
         # Must not read "No changes were detected" on an error day — that
@@ -146,7 +170,11 @@ def _build_body(
         lines.append("Updated Word docs and Excel tracker are attached to this email.")
 
     if baseline_notes:
-        lines.append("\nDocument discovery:")
+        # "Baseline" = the first time something was seen, so there is nothing
+        # to compare it against yet. A normal outcome, but it is said out loud
+        # so a first-sighting day is never mistaken for a quiet day
+        # (audit finding C-3).
+        lines.append("\nBaselines captured (first time seen — nothing to compare against yet):")
         for note in baseline_notes:
             lines.append(f"  - {note}")
 
@@ -172,6 +200,7 @@ def send_summary(
     sources_ok: int = 0,
     new_documents: list[dict] | None = None,
     baseline_notes: list[str] | None = None,
+    source_alerts: list[str] | None = None,
 ) -> None:
     errors = errors or []
     if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
@@ -180,7 +209,7 @@ def send_summary(
         raise RuntimeError("NOTIFY_EMAIL not set (check .env / GitHub secrets)")
 
     subject, body = _build_body(applied_changes, errors, sources_total, sources_ok,
-                                 new_documents, baseline_notes)
+                                 new_documents, baseline_notes, source_alerts)
 
     msg = EmailMessage()
     msg["Subject"] = subject

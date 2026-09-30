@@ -13,6 +13,7 @@ import re
 from datetime import datetime, timezone
 
 from db import next_id
+from fetch_sources import authority_refusal, is_authorised
 
 DETECTED_BY_PREFIX = "agent:anthropic"
 
@@ -71,12 +72,28 @@ def apply(change: dict, fetch_result, conn, model_name: str) -> str:
         existing plain-language summary.
       - Repeal -> update status to 'Repealed' (full_text and
         current_summary both kept for the record, untouched)
+
+    Refuses outright (raises, writes nothing) if the source this change came
+    from is not allowed to change this provision — only the official MeitY
+    Rules PDF may change DPDPR-* rows and only the official MeitY Act PDF may
+    change DPDPA-* rows. See fetch_sources.MAY_AMEND_RULES (audit C-4).
+
     Returns the new change_id.
     """
     now = datetime.now(timezone.utc).isoformat()
     today = now[:10]
-    change_id = next_id(conn, "change_log", "change_id", "CHG")
     provision_id = change["provision_id"]
+
+    # Source-authority rule (audit finding C-4). classify_change.classify()
+    # already drops an unauthorised change; this is the second, independent
+    # check, so a mistake in one place cannot undo the other. Checked BEFORE
+    # anything is written, and before a change_id is even allocated.
+    if not is_authorised(fetch_result.url, provision_id):
+        raise ValueError(authority_refusal(fetch_result.url,
+                                            getattr(fetch_result, "source", "unknown source"),
+                                            provision_id))
+
+    change_id = next_id(conn, "change_log", "change_id", "CHG")
 
     existing = conn.execute(
         "SELECT full_text FROM provisions WHERE provision_id = ?", (provision_id,)
