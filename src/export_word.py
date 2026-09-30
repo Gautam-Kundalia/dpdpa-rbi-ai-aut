@@ -349,13 +349,40 @@ def render_provision_body(doc, full_text, amendments):
                 claimed.setdefault((start, end), []).append((span_start, span_end))
                 placed += 1
         if placed == 0:
-            warned = True
-            print(
-                f"WARNING: {amendment['change_id']}'s changed text is no longer found "
-                f"verbatim outside a table in the current full_text — captioned but not "
-                f"highlighted.",
-                file=sys.stderr,
-            )
+            # Two very different reasons a change cannot be highlighted, and
+            # only one of them is a problem.
+            #
+            # If the changed words are STILL THERE in the provision's text,
+            # nothing is wrong: they just don't sit inside one paragraph, or
+            # they sit inside a table. A government change can legitimately
+            # span several paragraphs — corrigendum G.S.R. 892(E) item (v)(b)
+            # relabels a whole run of the Fourth Schedule Note's items — and
+            # this renderer only ever highlights text it can find whole inside
+            # a single block, deliberately, so it can never highlight the wrong
+            # words. That case is captioned and reported as a NOTE, because
+            # making it a warning would print the same alarming line on every
+            # regenerate forever, and a warning nobody can act on is how the
+            # one that matters gets missed (audit finding M-3).
+            #
+            # If the changed words are GONE from the text, that IS a problem
+            # worth a human's attention: a later correction moved them, or the
+            # recorded change no longer matches reality.
+            still_present = new_full_text in full_text
+            if still_present:
+                print(
+                    f"NOTE: {amendment['change_id']}'s changed text spans more than one "
+                    f"paragraph (or sits inside a table), so it is captioned rather than "
+                    f"highlighted. The text itself is present and correct.",
+                    file=sys.stderr,
+                )
+            else:
+                warned = True
+                print(
+                    f"WARNING: {amendment['change_id']}'s changed text is no longer found "
+                    f"verbatim in the current full_text — captioned but not highlighted. "
+                    f"Something has moved it; worth a look.",
+                    file=sys.stderr,
+                )
 
     for spans in diff_blocks.values():
         spans.sort(key=lambda span: span[0])
@@ -363,7 +390,10 @@ def render_provision_body(doc, full_text, amendments):
     if not diff_blocks:
         render_markdown_body(doc, full_text)
         add_amendment_caption(doc, amendments)
-        return True
+        # `warned`, not a hardcoded True: nothing was highlighted, but that is
+        # only worth flagging when the changed words have actually gone missing
+        # — see the two cases distinguished above.
+        return warned
 
     for start, end, block in blocks:
         spans = diff_blocks.get((start, end))

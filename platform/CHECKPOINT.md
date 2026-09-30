@@ -11,8 +11,12 @@
 - **Last updated:** 2026-09-30 by Claude Code — platform work still not started. What
   happened instead: the independent audit of the existing `src/` pipeline was worked
   through on branch `audit-fixes-2026-09-30`. **All 4 Critical and all 7 High
-  findings are now closed** — 9 fixed in code, 2 fixed by one-off scripts Gautam
-  runs. Finding by finding: `docs/audit_fixes_2026-09-30.md`. Narrative:
+  findings are addressed in code** — 9 fixed outright, 2 (H-5, H-7) waiting on
+  one-off scripts Gautam runs. Two of them are **not yet actually protecting
+  anything**: H-1 (the heartbeat) does nothing until the healthchecks.io check
+  exists and `HEARTBEAT_URL` is set, and H-3 (test CI) needs confirming green on
+  GitHub after the merge. Finding by finding: `docs/audit_fixes_2026-09-30.md`.
+  Narrative:
   `CHANGELOG.md` and `docs/audit_fixes_2026-09-30_session_report.md`. Order of
   everything done today: `docs/session_log_2026-09-30_audit_fixes.md`.
   That branch is **not pushed and not merged** — Gautam decides.

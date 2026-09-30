@@ -244,6 +244,39 @@ def test_an_amendment_whose_text_has_moved_on_is_captioned_but_not_highlighted(c
     assert warnings == ["DPDPR-R23"]
 
 
+def test_a_change_that_spans_paragraphs_is_captioned_without_raising_an_alarm(conn, capsys):
+    """
+    The other reason a change cannot be highlighted, and it is NOT a problem.
+
+    A government change can legitimately span several paragraphs — corrigendum
+    G.S.R. 892(E) item (v)(b) relabels a whole run of the Fourth Schedule
+    Note's items. This renderer only highlights text it can find whole inside
+    one paragraph, deliberately, so it can never highlight the wrong words.
+
+    So the words are still there and nothing is wrong. It must be captioned and
+    reported as a NOTE, not a WARNING: otherwise every regenerate, forever,
+    prints an alarming line that nobody can act on — which is exactly how the
+    one that matters gets missed (audit finding M-3).
+    """
+    body = "First paragraph of the Note.\n\nSecond paragraph of the Note."
+    seed_provision(conn, provision_id="DPDPR-R23", full_text=body,
+                    full_text_anchor="DPDPR_R23")
+    _insert_change(conn, change_id="CHG-0001", provision_id="DPDPR-R23",
+                    change_origin="regulatory",
+                    old_full_text="First para of the Note.\n\nSecond para of the Note.",
+                    new_full_text=body,
+                    detected_timestamp="2025-12-11T00:00:00")
+    doc, _count, warnings = ew.build_document(conn, RULES_SPEC)
+
+    assert _highlights(doc) == [], "must not guess at highlighting across paragraphs"
+    assert any("CHG-0001" in c for c in _captions(doc)), "the change must still be named"
+    assert warnings == [], "text that is present and correct is not a warning"
+
+    err = capsys.readouterr().err
+    assert "NOTE:" in err and "CHG-0001" in err, err
+    assert "WARNING:" not in err, err
+
+
 # --------------------------------------------------------------------------
 # M-5: Source_Log shows what is being watched right now
 # --------------------------------------------------------------------------

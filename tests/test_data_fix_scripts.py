@@ -247,8 +247,9 @@ def test_the_new_rows_show_up_as_yellow_change_log_rows_and_schedule_highlights(
     text that spans several paragraphs, and the renderer only ever highlights
     text it finds whole inside one paragraph. So that one is captioned rather
     than highlighted. That is the renderer's deliberate "caption it, but never
-    highlight the wrong words" behaviour, and it is a warning on stderr, not a
-    silent skip.
+    highlight the wrong words" behaviour. It prints a NOTE on stderr — not a
+    warning, because the text is present and correct and nobody needs to act on
+    it. See test_a_change_that_spans_paragraphs_is_captioned_without_raising_an_alarm.
     """
     import sys as _sys
     _sys.path.insert(0, str(REPO_ROOT / "src"))

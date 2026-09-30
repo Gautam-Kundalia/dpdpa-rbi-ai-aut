@@ -200,9 +200,20 @@ else moved.
    labelled (a) — and the corrigendum relabels the whole list (a) to (g). It is
    recorded as the run of text that actually changed. Because that run spans
    several paragraphs and the renderer only highlights text it finds whole
-   inside one paragraph, this one is **captioned but not highlighted**, with a
-   warning on stderr. That is a deliberate trade: a complete audit trail over a
-   prettier document.
+   inside one paragraph, this one is **captioned but not highlighted**. That is
+   a deliberate trade: a complete audit trail over a prettier document.
+
+   Following that through turned up one more thing to fix. The renderer
+   shouted `WARNING` at every case it could not highlight, which would have
+   meant an alarming line on **every regenerate, forever**, about a change that
+   is correctly recorded and will never highlight — and a warning nobody can
+   act on is exactly how the one that matters gets missed. That is audit
+   finding M-3, which this same audit fixed for the daily email; the same
+   mistake was sitting in a different output path. The two cases are now told
+   apart: words still present but spread across paragraphs prints `NOTE:` and
+   is not counted; words genuinely gone still prints `WARNING:` and still
+   counts. An early return that hardcoded "warned = True" regardless was fixed
+   at the same time.
 3. **The 15 heading dashes were never load-bearing for the verbatim guard.**
    Removing their exceptions and testing the *unfixed* text showed it still
    passes, because the guard deliberately ignores punctuation. The Seventh

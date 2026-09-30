@@ -1130,10 +1130,24 @@ corrigendum items to appear as yellow highlights. Three do. The fourth — item
 and the renderer only ever highlights text it finds whole inside a single
 paragraph. That is deliberate: it is the rule that stops it highlighting the
 wrong words. So that item is named in the provision's caption and is a yellow
-row in the Excel, but has no yellow words in the Word file, and it prints a
-warning rather than passing silently. The alternative would have been to record
-a smaller, tidier change than the government actually made, which would make
-the highlighting prettier and the legal audit trail incomplete.
+row in the Excel, but has no yellow words in the Word file. The alternative
+would have been to record a smaller, tidier change than the government actually
+made, which would make the highlighting prettier and the legal audit trail
+incomplete.
+
+**And that turned up one more thing worth fixing.** The renderer treated
+"cannot highlight this" as a single case and shouted `WARNING` about all of it.
+That would have meant an alarming line on **every regenerate, forever**, about
+a change that is correctly recorded and will never highlight — and a warning
+nobody can act on is precisely how the one that matters gets missed. (That is
+audit finding M-3, which this same audit fixed for the daily email.) The two
+cases are now told apart, because they are genuinely different:
+
+- the changed words are **still there**, just spread across paragraphs or
+  inside a table — nothing is wrong, so it prints `NOTE:` and is not counted as
+  a warning;
+- the changed words have **gone** from the text — something moved them, which a
+  person should look at, so it still prints `WARNING:` and still counts.
 
 ### Documentation — everything reflected everywhere
 

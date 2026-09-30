@@ -379,6 +379,16 @@ python src\run_pipeline.py               # the daily pipeline, run manually
 pytest tests/                            # run the test suite (scratch DBs only)
 ```
 
+**One thing to expect:** `export_excel.py` applies any pending database
+migration before it reads, the same way `run_pipeline.py` does. Migrations here
+are always additive — a new column with a default, never a removal or a rename
+— so no existing row is changed. But SQLite rewrites the file when it adds a
+column, so **`git status` will show `db/dpdpa.db` as modified even on a run
+where nothing else changed.** That is expected, and it should be committed
+along with the regenerated documents. (Before 30 Sep 2026 the exporter did not
+do this, and running it on a database that predated the `watched` column died
+with `sqlite3.OperationalError: no such column: watched`.)
+
 The GitHub Actions workflow runs `run_pipeline.py` automatically every day
 at 06:17 IST (cron is UTC-specified; see the workflow file — GitHub may
 still start it hours late, a scheduler-queueing effect outside this
@@ -544,6 +554,11 @@ M-7, M-12):**
   whole inside one paragraph — deliberately, so it can never highlight the
   wrong words. That change is named in the provision's caption and is a yellow
   row in the Excel Change_Log; it just has no yellow words in the Word file.
+  Regenerating prints one line about it on stderr, starting `NOTE:` — that is
+  expected and means nothing is wrong. A change whose words have actually gone
+  missing from the text prints `WARNING:` instead and is counted in the run's
+  warning total; those two cases are deliberately told apart, so a note nobody
+  can act on never crowds out a warning somebody must.
 - **Two run-in separator dashes in the Fifth Schedule are still missing.** The
   Gazette prints `namely:-` in two places where the database has `namely:`.
   They are recorded as reviewed exceptions in
