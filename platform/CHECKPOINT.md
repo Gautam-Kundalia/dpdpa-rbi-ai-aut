@@ -11,7 +11,8 @@
 - **Last updated:** 2026-09-30 by Claude Code — platform work still not started. What
   happened instead: the four critical findings from the independent audit of the
   existing `src/` pipeline were fixed on branch `audit-fixes-2026-09-30` (see the
-  session log at the bottom and `CHANGELOG.md`). That branch is **not pushed and
+  session log at the bottom, `CHANGELOG.md`, and the full report in
+  `docs/audit_fixes_2026-09-30_session_report.md`). That branch is **not pushed and
   not merged** — Gautam decides. Platform Session 1 is still the next thing to start.
 
 ## Session 1 — Interim approval fix + backend skeleton

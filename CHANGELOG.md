@@ -979,3 +979,10 @@ a test that failed first for the right reason.
 **$0 — no AI calls.** Every test uses the mock classifier; the only network
 traffic was two polite read-only fetches of the MeitY Rules PDF while proving the
 backfill script.
+
+### Full session report
+
+A complete blow-by-blow account of this session — what was already done before it
+started, how each finding was proven rather than assumed, the evidence tables, the
+things deliberately not done, and the order Gautam should run things in — is in
+`docs/audit_fixes_2026-09-30_session_report.md`.
