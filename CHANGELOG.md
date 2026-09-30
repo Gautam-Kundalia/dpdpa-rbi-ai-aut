@@ -38,12 +38,18 @@ None of them was a fault in the repair. They were three separate things:
    commit `83207c2` — the last commit before both the bot's column and the
    repair. Nothing writes to it, so it cannot drift again.
 
-   Worth saying plainly: one of these tests (`test_the_three_scripts_run_
-   together_in_order`) was still *passing*, because the numbers it checks were
-   already true of the repaired database before it did anything. It could not
-   have failed. Under this project's own rule — a test that cannot fail is not
-   a test — it was the most misleading of the eight, and the fixture fixes it
-   too.
+   Worth saying plainly: several of these eight tests were still *passing*,
+   and that was worse than failing. `test_the_three_scripts_run_together_in_
+   order` is the clearest case: every number it checks — 149 change-log rows,
+   3 watched sources, 7 government changes — was already true of the repaired
+   database before the test did anything, so it could not have failed.
+   `test_applying_retires_exactly_four_sources_and_deletes_nothing`,
+   `test_the_corrigendum_pairs_are_unique_where_they_have_to_be` and
+   `test_the_new_rows_show_up_as_yellow_change_log_rows_and_schedule_highlights`
+   were in the same position. Under this project's own rule — a test that
+   cannot fail is not a test — these were the most misleading of the eight, and
+   the fixture is what gives them their teeth back: against it, all three of
+   the three-scripts test's numbers are false until the scripts actually run.
 
 2. **Two tests were about wording that no longer exists.** The verbatim guard
    keeps a list of reviewed, documented differences between our stored text and

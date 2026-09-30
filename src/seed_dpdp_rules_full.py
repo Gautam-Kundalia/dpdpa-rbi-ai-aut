@@ -69,9 +69,12 @@ EFF_GROUP_C = ("2027-05-13", "In force eighteen months after Gazette publication
 # The text below is the original September 2025 typing, kept for the
 # provision_id / reference / topic / summary columns that main() DOES use. It
 # has drifted from the JSON in 7 rows (DPDPR-R1, R23, SDF-R13, SCH1, SCH3,
-# SCH4, SCH5), because corrections made since then — the G.S.R. 892(E)
-# corrigendum, and the Notes and Illustrations restored by the 23 Sep 2026
-# audit — were applied to the database and the JSON but not here.
+# SCH4, SCH5), because corrections made since then were applied to the database
+# and the JSON but not here. Some of that drift is clearly the G.S.R. 892(E)
+# corrigendum and the Notes and Illustrations restored by the 23 Sep 2026 audit;
+# the rest (DPDPR-SCH3 alone differs in 26 places) has not been traced back to a
+# particular piece of work, and nobody needs to trace it — the JSON is the
+# authority either way.
 #
 # So: do not quote the wording below as law, and do not "fix" a row here
 # expecting it to change what gets seeded. Change the JSON.
