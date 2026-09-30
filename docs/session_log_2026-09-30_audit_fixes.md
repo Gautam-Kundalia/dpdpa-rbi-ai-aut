@@ -51,9 +51,10 @@ that point.
 | 11 | 20:17 | `c3828c6` | **Fix what checking `4e445cf` found**: the Excel rebuild crashed, and the M-5 test could not fail | **178** |
 | 12 | 20:35 | `4e42aa0` | Write the two data-repair scripts (H-5, H-7, M-11) and their tests | **198** |
 | 13 | 20:40 | `b1e8cf4` | Correct the documentation the audit proved wrong; write the finding-by-finding table (L-7, Task C) | 198 |
-| 14 | — | this commit | CHANGELOG, CLAUDE.md standing rules, checkpoint, this file | 198 |
+| 14 | 20:47 | `df0a3c1` | CHANGELOG, CLAUDE.md standing rules, checkpoint, this file | 198 |
+| 15 | 20:57 | `6059d5a` | Tell "cannot highlight this" apart from "the text has gone missing", so a change that is captioned by design stops printing a warning on every regenerate | **199** |
 
-Baseline before any of this work: **76 tests.** Final: **198, zero failures.**
+Baseline before any of this work: **76 tests.** Final: **199, zero failures.**
 The single warning in the run is a `CryptographyDeprecationWarning` about a
 non-positive serial number in the real e-Gazette certificate chain — the
 government's certificate, not this project's code, and worth knowing about
