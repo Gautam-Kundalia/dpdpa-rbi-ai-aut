@@ -709,6 +709,51 @@ def test_a_known_exception_only_applies_to_its_own_exact_text(rules_pdf_text):
     assert check_rules_provision("DPDPR-SCH7", mutated, rules_pdf_text) != []
 
 
+@pytest.mark.parametrize(
+    "provision_id, find, replace_with",
+    [
+        # Same table row as the H-7 exception, but a different clause of it.
+        ("DPDPR-SCH7", "disclosure of any information", "disclosure of no information"),
+        # A different row of the same Schedule entirely.
+        ("DPDPR-SCH7", "sovereignty and integrity of India",
+         "sovereignty and integrity of Indias"),
+        ("DPDPR-SCH5", "four lakh fifty thousand", "four lakh eighty thousand"),
+        ("DPDPR-SCH6", "Travelling allowance", "Travelling allowances"),
+        ("DPDPR-SCH4", "clinical establishment", "clinical establishments"),
+    ],
+)
+def test_an_exception_does_not_shelter_the_rest_of_its_provision(
+    provision_id, find, replace_with, rules_pdf_text
+):
+    """
+    NEGATIVE test for the other way an exception could go wrong.
+
+    `test_a_known_exception_only_applies_to_its_own_exact_text` above proves an
+    exception stops applying once the text it names changes. This proves the
+    opposite-facing property: an exception must not quietly excuse the WHOLE
+    provision it is listed under. Every provision used here carries at least one
+    reviewed exception, and each mutation is deliberately placed somewhere else
+    in that provision — in one case in the very same Schedule table row as the
+    excepted phrase. The guard must still fail.
+
+    Why this matters in plain words: the Fourth to Seventh Schedules hold seven
+    of the eight provisions that have an exception recorded against them. If
+    "has an exception" meant "is not really checked", those Schedules would be
+    unguarded legal text while the test suite still reported all green.
+    """
+    stored = dict(_rules_provisions())[provision_id]
+    assert find in stored, f"{find!r} is no longer in {provision_id} — update this test"
+    assert check_rules_provision(provision_id, stored, rules_pdf_text) == [], \
+        "the unmutated row should pass — the mutation test proves nothing otherwise"
+
+    mutated = stored.replace(find, replace_with, 1)
+    assert check_rules_provision(provision_id, mutated, rules_pdf_text) != [], (
+        f"{provision_id} has a reviewed exception recorded against it, and the guard "
+        f"PASSED it with {find!r} changed to {replace_with!r} somewhere else in the same "
+        f"provision. An exception must shelter only its own exact reviewed text."
+    )
+
+
 def test_every_known_exception_is_still_needed():
     """
     Housekeeping: an exception whose database text no longer exists is dead

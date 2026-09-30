@@ -11,9 +11,10 @@ later once this half is proven out in production.
 ## Architecture
 
 ```
-PIB (RSS, English) -----\
-MeitY (working copy) -----+--> src/fetch_sources.py --> source_log (hash-based
-eGazette (weak signal) --/                                change detection)
+MeitY Rules PDF --------\    (the only two sources allowed to
+MeitY Act PDF -----------+--> change stored legal text)
+PIB (RSS, alert-only) --/   src/fetch_sources.py --> source_log (hash-based
+                                                      change detection)
                                                               |
                                                     changed sources only
                                                               v
@@ -99,30 +100,82 @@ entire row light yellow only for a `regulatory` row, and
 
 ## Sources & change detection
 
-Three sources, in trust order:
+Three sources are fetched daily. They are **not** equally trusted, and
+since 30 Sep 2026 that difference is enforced in code, not just described
+here — see "Which source may change which law" below.
 
-1. **PIB** — an RSS feed (`RssMain.aspx?...&lang=1`), explicitly
-   parameterised to English. This replaced scraping PIB's HTML "all
-   releases" page, which could silently serve Hindi depending on the
-   requesting client's apparent locale with no way to confirm what
-   language GitHub Actions' server would see.
-2. **MeitY** — the two known static PDF paths (DPDP Rules 2025, DPDP Act
-   2023) — the most reliable source, direct file URLs. (MeitY does have
-   two pages listing DPDP documents, which would catch a *new*
-   notification or corrigendum that these two fixed PDF URLs can't — but
-   they're Next.js single-page apps with no server-rendered content, and a
-   real headless browser gets blocked outright (HTTP 403) by the site's own
+1. **MeitY** — the two known static PDF paths (DPDP Rules 2025, DPDP Act
+   2023). These are the only trustworthy sources, because they are the
+   official documents themselves at direct file URLs, and they are the
+   only two allowed to change stored legal text. (MeitY does have two
+   pages listing DPDP documents, which would catch a *new* notification or
+   corrigendum that these two fixed PDF URLs can't — but they're Next.js
+   single-page apps with no server-rendered content, and a real headless
+   browser gets blocked outright (HTTP 403) by the site's own
    bot-detection. Investigated twice now, genuinely not reachable either
    way — see `fetch_sources.py`'s header comment and
    `docs/detection_coverage_2026-09-30.md`.)
-3. **eGazette** (`https://egazette.gov.in/`) — meant to be the
-   authoritative confirmation source, but its real notification search is
-   a session-scoped ASP.NET postback form (no stable endpoint found).
-   Currently hashes the home page as a coarse best-effort signal — **known
-   limitation**. Also required disabling TLS verification specifically for
-   this host (its cert chains to a root Windows trusts but the `certifi`
-   bundle doesn't — verified by hand via a raw TLS socket check, not
-   blanket-disabled).
+2. **PIB** — an RSS feed (`RssMain.aspx?...&lang=1`), explicitly
+   parameterised to English. This replaced scraping PIB's HTML "all
+   releases" page, which could silently serve Hindi depending on the
+   requesting client's apparent locale with no way to confirm what
+   language GitHub Actions' server would see. **PIB is a coincidence
+   detector, not a reliable source.** A press release is not a legal
+   instrument: it can tell you that something DPDP-shaped has happened, it
+   can never tell you what the law now says. So when a PIB headline
+   matches the DPDP keywords, the pipeline makes **no AI call** and simply
+   adds an alert line to the daily email ("PIB mentions data protection:
+   *title* — go and look") for a human to follow up.
+
+**Retired 30 Sep 2026 — the eGazette home page** (`https://egazette.gov.in/`)
+was a third fetched source. It was meant to be the authoritative
+confirmation source, but its real notification search is a session-scoped
+ASP.NET postback form with no stable endpoint, so all it ever did was hash
+the home page. That signal reported "changed" on 20 of 23 recorded
+production days and produced a real change on none of them — a 100%
+false-positive rate that also spent an AI call every single day for
+nothing — while still being a page whose text could in principle reach
+stored legal text. It is no longer fetched or classified. Its actual job,
+noticing a brand-new Gazette document, is now done properly by the
+document-discovery layer below, which drives eGazette's own "Search by
+Ministry" form and only ever raises an alert. Its `source_log` row is kept
+(it carries change history) but marked `watched = 0` by
+`scripts/mark_unwatched_sources_2026-09-30.py`.
+
+TLS certificate verification is **no longer switched off for any host**.
+eGazette chains to a root that Windows trusts but the `certifi` bundle does
+not, which used to be worked around by disabling verification for that one
+host. The chain is now pinned in `certs/egazette-chain.pem` and verified
+against it. `certs/README.md` holds the fingerprints, how they were
+cross-checked, and the runbook for when the pinned root changes.
+
+### Which source may change which law (the source-authority rule)
+
+Both verbatim checks in `classify_change.py` require the new legal text to
+appear in the *fetched content* — which is exactly the text whoever
+controls that page controls. The 30 Sep 2026 audit demonstrated the
+consequence end-to-end against the real production model: a forged
+"notification" appended to a watched page was accepted and written into
+`provisions.full_text`. The model behaved correctly; the system simply had
+no way to tell a real Gazette notification from text that merely appears
+on a Gazette web page.
+
+So each source now carries a `may_amend` list in `src/fetch_sources.py`
+naming the provision IDs it is permitted to change:
+
+| Source | May change |
+|---|---|
+| MeitY — DPDP Rules 2025 PDF | `DPDPR-*` only |
+| MeitY — DPDP Act 2023 PDF | `DPDPA-*` only |
+| PIB feed | nothing — alert only |
+| anything else, now or in future | nothing — alert only |
+
+The rule **fails closed**: a URL that isn't listed gets an empty list, so
+any source added later is alert-only until someone deliberately grants it
+authority. It is enforced twice, in `classify_change.classify()` and again
+in `apply_change.apply()`, so a mistake in one place cannot undo the other.
+A refused change is never silently dropped — it is reported as an error, so
+it reaches the run's exit code and the daily email.
 
 `fetch_sources.py` hashes *extracted, cleaned text* (not raw bytes) so PDF
 metadata churn and HTML analytics-script noise don't cause false-positive
@@ -168,10 +221,17 @@ This is a **deliberate project decision**: detected changes are classified
 by Claude (`CLAUDE_MODEL` in `.env`, defaulting to `claude-haiku-4-5`, via
 the Anthropic API with forced tool-use) and applied straight to
 `provisions` immediately, with no pending-review step. `Review_Status` on
-a `change_log` row records how confident the automated classification
-was — it is **not** a queue waiting for a consultant's sign-off. If a
-human check before a change goes live is wanted, that would need to be a
-deliberate change to the pipeline; right now, it isn't there.
+a `change_log` row is written by the pipeline as `Approved` by `auto` — it
+is **not** a queue waiting for a consultant's sign-off. (Separately, on
+29 Sep 2026 Gautam reviewed every row that existed then by hand, so the
+current 79 provisions and 142 change rows do carry a real human sign-off;
+anything the pipeline adds from now on does not.) If a human check *before*
+a change goes live is wanted, that would need to be a deliberate change to
+the pipeline; right now, it isn't there.
+
+What does constrain auto-apply is the source-authority rule above: a change
+is only ever applied if it came from the official document for that
+instrument. Nothing else can write legal text, whatever it appears to say.
 `classify_change.py`'s prompt is built to return an empty change list
 rather than guess when it can't find confident verbatim text, and both
 `classify_change.py` and `apply_change.py` fail safe (mark
@@ -214,7 +274,8 @@ src/
   seed_dpdp_rules_full.py   loads all 23 Rules + 7 Schedules (verbatim)
   seed_dpdp_act_full.py     loads all 44 Act sections + Schedule, from
                              data/act_verbatim_2026-09-23.json
-  fetch_sources.py          fetches PIB/MeitY/eGazette, hash-based change detection
+  fetch_sources.py          fetches the two MeitY PDFs + PIB, hash-based change
+                             detection; also holds the may_amend authority table
   discover_documents.py     alert-only: watches document *listings* (eGazette
                              ministry search) for brand-new documents; never
                              touches provisions/change_log — see "Document
@@ -367,10 +428,13 @@ without an excerpt.
 ## Not yet built
 
 - A stable, verified eGazette search/filter endpoint **for the main daily
-  fetch/classify pipeline above** — separate from the new discovery layer,
+  fetch/classify pipeline above** — separate from the discovery layer,
   which does have a working eGazette search now (see above). The old,
-  coarse home-page hash is still what `fetch_sources.py` uses for its own
-  change detection.
+  coarse home-page hash that `fetch_sources.py` used instead was retired on
+  30 Sep 2026 rather than replaced (see "Sources & change detection"), so
+  the daily fetch/classify pipeline now has no eGazette signal of its own.
+  That is a deliberate trade: the signal it gave was wrong 100% of the time
+  it fired, and the discovery layer covers the same ground honestly.
 - MeitY's own DPDP-documents listing pages, for the same reason as above —
   investigated for discovery too, genuinely blocked (see "Sources & change
   detection").
@@ -378,12 +442,28 @@ without an excerpt.
 
 ## Known limitations
 
-- **eGazette**'s *fetch_sources.py* signal still doesn't have a confirmed
-  stable search endpoint for its own change detection (see above) — its
-  signal is weaker than PIB/MeitY there. The separate discovery layer's
-  eGazette search (above) does not have this limitation.
 - **No human review gate** on auto-applied changes — by design, not an
-  oversight; see "Classification & auto-apply" above.
+  oversight; see "Classification & auto-apply" above. Whether to add an
+  approval gate is Gautam's and EY's decision, deliberately left open
+  rather than guessed at.
+- **Court orders and Data Protection Board orders are not watched at all.**
+  Sections 11 and 12 of the Act (a Data Principal's rights, and the Board's
+  powers) can be shaped in practice by Board orders and by court judgments,
+  and nothing in this project looks for either. There is no automated
+  source for them here and none is planned — assume they are unmonitored
+  and check them by hand if they matter to a question you are answering.
+- **`confidence_score` is recorded but does not gate anything.** Every
+  AI-classified change stores the model's own confidence, and a low score
+  does *not* stop a change being applied. This is deliberate: the audit
+  measured a genuine, correctly-identified amendment at 0.65, so a
+  threshold would have blocked a real change. Treat the number as a hint
+  when reviewing, not as a safety mechanism.
+- **The Excel tracker's README sheet is out of date** on two points: it
+  says `Review_Status` only records the AI's confidence (the 79 provisions
+  and 142 change rows were reviewed by a person on 29 Sep 2026), and its
+  wording predates the source-authority rule above. The sheet is generated
+  from `src/export_excel.py`, and the file itself is owned by the daily
+  bot, so it is corrected on `main` rather than on a working branch.
 - The document-discovery layer only watches MeitY notifications via
   eGazette — PIB was investigated as a second discovery source and ruled
   out (its feed holds only 20 items across every ministry, with no date on
