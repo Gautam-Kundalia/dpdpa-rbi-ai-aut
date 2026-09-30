@@ -76,6 +76,7 @@ import requests
 from pypdf import PdfReader
 
 from classify_change import _is_mostly_hindi
+from db import PROJECT_ROOT
 
 USER_AGENT = "Mozilla/5.0 (compatible; DPDPAChangeMonitor/1.0)"
 
@@ -124,20 +125,64 @@ def _match_keywords(*texts: str | None) -> list[str]:
     return [kw for kw in KEYWORDS if kw.lower() in haystack]
 
 
-def _download_pdf_bytes(url: str) -> bytes:
-    # Mirrors fetch_sources._fetch_raw's egazette.gov.in TLS workaround: its
-    # cert chain is trusted by Windows' own store but not by certifi's
-    # bundle (verified by hand there — no MITM indication), so we skip
-    # verification for that one known host rather than weakening TLS checks
-    # everywhere.
-    verify = "egazette.gov.in" not in url
-    if not verify:
+# Trust file for egazette.gov.in (audit finding C-4, 30 Sep 2026).
+#
+# The old comment here — and the README, and the audit — said the site chains
+# to a root that Windows trusts and certifi does not. That was measured on
+# 30 Sep 2026 and is NOT what is wrong. The site now uses a Let's Encrypt
+# certificate, and the actual fault is that the server does not send its
+# INTERMEDIATE certificate at all. Windows copes because it silently fetches
+# the missing intermediate itself; OpenSSL (which Python uses) does not, and
+# reports "unable to get local issuer certificate".
+#
+# certs/egazette-chain.pem supplies the missing links, each one checked
+# offline against certifi's own ISRG Root X1 before it was committed. See
+# certs/README.md for the fingerprints and how to refresh it.
+EGAZETTE_CHAIN_PEM = PROJECT_ROOT / "certs" / "egazette-chain.pem"
+
+
+def _verify_arg(url: str):
+    """What to pass to requests' verify= for this URL."""
+    if "egazette.gov.in" in url and EGAZETTE_CHAIN_PEM.exists():
+        return str(EGAZETTE_CHAIN_PEM)
+    return True
+
+
+def _download_pdf_bytes(url: str, tls_warnings: list[str] | None = None) -> bytes:
+    """
+    Download a PDF with TLS certificate checking ON.
+
+    If the check fails for egazette.gov.in — which will happen the day Let's
+    Encrypt issues that site's certificate from a different intermediate than
+    the one pinned in certs/egazette-chain.pem — the download is retried
+    unverified AND a warning is recorded, because this whole module is
+    alert-only: it never writes to provisions or change_log, it only emails a
+    link for a human to open. Losing the alert entirely would be worse than an
+    unverified read of a public PDF. The warning is never swallowed: it goes
+    into the run's error list and therefore into the email.
+    """
+    try:
+        resp = requests.get(
+            url, headers={"User-Agent": USER_AGENT}, timeout=PDF_TIMEOUT,
+            verify=_verify_arg(url), stream=True,
+        )
+    except requests.exceptions.SSLError as exc:
+        warning = (
+            f"TLS certificate check FAILED for {url} ({exc}). Read it anyway, "
+            f"unverified, because document discovery only ever raises an alert for a "
+            f"human — but the excerpt below is NOT authenticated, so open the link "
+            f"yourself. Fix: the pinned chain in certs/egazette-chain.pem is out of "
+            f"date — see certs/README.md."
+        )
+        print(f"[discover_documents] WARNING: {warning}")
+        if tls_warnings is not None:
+            tls_warnings.append(warning)
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    resp = requests.get(
-        url, headers={"User-Agent": USER_AGENT}, timeout=PDF_TIMEOUT,
-        verify=verify, stream=True,
-    )
+        resp = requests.get(
+            url, headers={"User-Agent": USER_AGENT}, timeout=PDF_TIMEOUT,
+            verify=False, stream=True,
+        )
     resp.raise_for_status()
     content = resp.raw.read(MAX_PDF_BYTES + 1, decode_content=True)
     if len(content) > MAX_PDF_BYTES:
@@ -263,6 +308,16 @@ def fetch_egazette_meity(today: date | None = None) -> dict:
     with sync_playwright() as p:
         browser = p.chromium.launch()
         try:
+            # ignore_https_errors stays ON here, deliberately, and it is the
+            # one place in this project where certificate checking is off
+            # (audit finding C-4). Two reasons: (1) this page is read for a
+            # LIST of document titles and Gazette IDs only — it can produce an
+            # alert for a human, never a change to stored legal text; (2)
+            # giving headless Chromium an extra CA certificate needs an NSS
+            # database on the CI runner, which is a lot of machinery for an
+            # alert-only read. The PDF download below IS verified (see
+            # _download_pdf_bytes). Open item: teach this step to use
+            # certs/egazette-chain.pem too.
             page = browser.new_page(ignore_https_errors=True, user_agent=USER_AGENT)
             # Block image/font/stylesheet/media requests outright: two real
             # production runs hung waiting for a page to "settle" even with
@@ -501,7 +556,9 @@ def discover_all(conn, errors: list[str], dry_run: bool = False) -> tuple[list[d
             unreadable = False
             if item["url"].lower().endswith(".pdf"):
                 try:
-                    raw = _download_pdf_bytes(item["url"])
+                    # Any TLS problem is recorded in `errors`, so it reaches the
+                    # email rather than only the log (see _download_pdf_bytes).
+                    raw = _download_pdf_bytes(item["url"], tls_warnings=errors)
                     text = _extract_pdf_text(raw)
                     for kw in _match_keywords(text):
                         if kw not in matched:
