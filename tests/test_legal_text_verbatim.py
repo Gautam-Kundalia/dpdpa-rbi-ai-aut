@@ -1,42 +1,60 @@
 """
-Phase 8: a PERMANENT guard against paraphrase creeping back into the
-legal text. Runs the same mechanical checks the verbatim-rebuild scripts
-used (C1: contiguous substring of the primary PDF extraction; C2: cross-
-checked against a second, independent PDF library; C3: >=99.5% word
-coverage; C4: fabrication blacklist; C5: spot-checked facts) against the
-COMMITTED database and the stored, hash-verified source PDFs.
+A PERMANENT guard against paraphrase creeping back into the legal text.
 
-Act table (48 rows): deliberately reuses
-scripts/rebuild_act_verbatim_2026-09-23.py's own check logic (by invoking
-it in its default --dry-run mode, which never writes to the database) —
-the guard is only as good as staying identical to what was actually
-verified when the text was written, and that script is idempotent
-(its checks work the same whether or not the text has already been
-corrected).
+What it actually does (this docstring was wrong until 30 Sep 2026 — audit
+findings C-1 and C-2, and §6 claims 1 and 2):
 
-Rules table (31 rows): scripts/restore_rules_schedule_gaps_2026-09-23.py
-is NOT idempotent — its checks assume they're running BEFORE its one-time
-fix is applied, and correctly refuse (STOP) if the "old" placeholder text
-they expect isn't there, which is exactly what's expected now that it has
-been applied. So this file implements its own light-weight, idempotent
-C1-style check directly: every Rules provision's current full_text
-(paragraph by paragraph; table cells individually) must be a contiguous,
-normalized substring of a fresh extraction of the Rules PDF's English
-half (pages 24-41). Reuses normalize()/strip_heading() from the Act
-rebuild script rather than redefining them, so both checks treat
-whitespace/quote/dash normalization identically.
+Act table (48 `DPDPA-*` rows)
+    Invokes scripts/rebuild_act_verbatim_2026-09-23.py in its default
+    dry-run mode (which never writes to the database). Since 30 Sep 2026
+    that script's checks C1/C2/C4 read each provision's `full_text` FROM
+    THE DATABASE and compare it against the hash-verified official PDF.
+    Before that date they read the PDF-derived text on both sides, so they
+    compared the PDF to itself and could not fail (C-1).
+
+Rules table (31 `DPDPR-*` rows)
+    Its own idempotent check: every provision's stored `full_text`
+    (paragraph by paragraph; table cells individually), normalized, must be
+    a contiguous substring of a fresh extraction of the Rules PDF's English
+    half (pages 24-41). Where it is not, the piece must still match the PDF
+    IN WORD ORDER with every difference confined to punctuation or spacing.
+    Until 30 Sep 2026 the fallback was "at least 97% of this piece's words
+    appear SOMEWHERE in the PDF", which legal text satisfies from its own
+    vocabulary — a `shall` -> `may` swap passed (C-2).
+
+Known, reviewed differences live in `_KNOWN_EXCEPTIONS` as exact pairs:
+the specific text the database really holds, the text the PDF really has,
+the reason, and the audit finding ID. An exception only applies when the
+database still holds that exact string — so when the one-off data-fix
+scripts restore the official wording, the exception simply stops applying
+and the ordinary exact match takes over. No exception can hide a NEW
+problem.
+
+Negative tests ("mutation tests") sit alongside every positive one: they
+corrupt one thing and require the guard to notice. A guard with no test
+that makes it fail is not evidence of anything — that is how C-1 survived
+for a week with a green test suite.
 """
 from __future__ import annotations
 
+import difflib
 import hashlib
 import importlib.util
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+# Both PDF libraries are hard requirements for this file: without them every
+# test here fails for an environment reason that looks like a data problem
+# (audit I-7 — 32 mysterious failures on a machine with no PDF tooling).
+# Skip loudly and once instead.
+pytest.importorskip("pymupdf", reason="PyMuPDF is needed to read the Rules PDF (pip install pymupdf)")
+pytest.importorskip("pdfplumber", reason="pdfplumber is needed to read the Act PDF (pip install pdfplumber)")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -54,39 +72,39 @@ def _load_module(path: Path, name: str):
 _act_rebuild = _load_module(REPO_ROOT / "scripts" / "rebuild_act_verbatim_2026-09-23.py", "act_rebuild")
 normalize = _act_rebuild.normalize
 
+ACT_REBUILD_SCRIPT = REPO_ROOT / "scripts" / "rebuild_act_verbatim_2026-09-23.py"
 RULES_PDF = REPO_ROOT / "docs" / "audit_2026-09-23" / "DPDP_Rules_2025_official_2026-09-23.pdf"
 RULES_PDF_SHA256 = "eabc7d05e013144615d78ddc0e8b9c9aac1920e814f4fad38ce6560951f5aa08"
 CORRIGENDUM_PDF = REPO_ROOT / "docs" / "audit_2026-09-23" / "GSR892E_Rules_corrigendum_official.pdf"
 CORRIGENDUM_PDF_SHA256 = "8f8d9526b511801889f8ae022b6d7c5db449283e90fe32792e5896314b32f994"
 LIVE_DB_PATH = REPO_ROOT / "db" / "dpdpa.db"
 
+
 # --------------------------------------------------------------------------
-# Act table: reuse the (idempotent) rebuild script's own dry-run checks
+# Act table: the (idempotent) rebuild script's own dry-run checks, which now
+# read the database
 # --------------------------------------------------------------------------
 
-_SIDE_EFFECT_FILES = [
-    "data/act_verbatim_2026-09-23.json",
-    "docs/act_verbatim_rebuild_2026-09-23.md",
-]
-
-
-@pytest.fixture
-def restore_rebuild_side_effects():
-    yield
-    subprocess.run(["git", "checkout", "--"] + _SIDE_EFFECT_FILES, cwd=REPO_ROOT)
-
-
-def test_act_table_passes_verbatim_checks_c1_to_c5(restore_rebuild_side_effects):
+def _run_act_check(db_path: Path, out_dir: Path) -> subprocess.CompletedProcess:
     """
-    Runs scripts/rebuild_act_verbatim_2026-09-23.py in its default dry-run
-    mode: re-extracts the Act PDF (hash-verified), re-runs checks C1-C5
-    against the 48 DPDPA-* rows currently committed in db/dpdpa.db, and
-    exits non-zero if anything no longer matches verbatim. No DB writes.
+    Run the rebuild script's checks against `db_path`, writing its two report
+    files into `out_dir`. Nothing tracked by git is touched — the script used
+    to write them into the repo and the old test repaired that with
+    `git checkout --`, which is not something a test should ever do (L-6).
     """
-    result = subprocess.run(
-        [sys.executable, "scripts/rebuild_act_verbatim_2026-09-23.py"],
+    return subprocess.run(
+        [sys.executable, str(ACT_REBUILD_SCRIPT), "--db", str(db_path), "--out-dir", str(out_dir)],
         cwd=REPO_ROOT, capture_output=True, text=True, timeout=300,
     )
+
+
+def test_act_table_passes_verbatim_checks_c1_to_c5(tmp_path):
+    """
+    Re-extracts the Act PDF (hash-verified), re-runs checks C1-C5 against the
+    48 DPDPA-* rows' `full_text` as committed in db/dpdpa.db, and exits
+    non-zero if anything no longer matches verbatim. No database writes.
+    """
+    result = _run_act_check(LIVE_DB_PATH, tmp_path)
     assert result.returncode == 0, (
         f"Act verbatim check failed (exit {result.returncode}):\n"
         f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
@@ -94,8 +112,64 @@ def test_act_table_passes_verbatim_checks_c1_to_c5(restore_rebuild_side_effects)
     assert "All checks C1-C5 passed" in result.stdout, result.stdout
 
 
+# Each entry: (a name for the test id, the provision to corrupt, the text to
+# find, the text to put there instead). Both of these are the exact
+# corruptions the 30 Sep 2026 audit showed the old check passing.
+ACT_MUTATIONS = [
+    (
+        "nonsense_replaces_section_33",
+        "DPDPA-S33",
+        None,   # replace the whole row
+        "**Section 33 - Penalties**\n\n"
+        "There are no penalties under this Act. Nothing here is real legal text.",
+    ),
+    (
+        "significant_becomes_insignificant",
+        "DPDPA-S33",
+        "is significant",
+        "is insignificant",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "provision_id, find, replace_with",
+    [(pid, find, rep) for _name, pid, find, rep in ACT_MUTATIONS],
+    ids=[name for name, _pid, _f, _r in ACT_MUTATIONS],
+)
+def test_act_check_fails_when_the_database_text_is_corrupted(tmp_path, provision_id, find, replace_with):
+    """
+    NEGATIVE test (this is the C-1 regression test). Corrupt one Act row in a
+    throwaway copy of the database and require the check to fail. Before
+    30 Sep 2026 both of these corruptions passed, because the check never
+    read the database at all.
+    """
+    db_copy = tmp_path / "mutated.db"
+    shutil.copy2(LIVE_DB_PATH, db_copy)
+    conn = sqlite3.connect(db_copy)
+    current = conn.execute(
+        "SELECT full_text FROM provisions WHERE provision_id = ?", (provision_id,)
+    ).fetchone()[0]
+    if find is None:
+        new_text = replace_with
+    else:
+        assert find in current, f"{find!r} is no longer in {provision_id} — update this test"
+        new_text = current.replace(find, replace_with, 1)
+    conn.execute(
+        "UPDATE provisions SET full_text = ? WHERE provision_id = ?", (new_text, provision_id)
+    )
+    conn.commit()
+    conn.close()
+
+    result = _run_act_check(db_copy, tmp_path / "out")
+    assert result.returncode != 0, (
+        "the Act verbatim check PASSED on a corrupted database — the guard is not "
+        f"reading provisions.full_text:\n{result.stdout[-3000:]}"
+    )
+
+
 # --------------------------------------------------------------------------
-# Rules table: standalone idempotent C1/C2-style check
+# Rules table: standalone idempotent check against the official PDF
 # --------------------------------------------------------------------------
 
 def _verify_source_hashes():
@@ -153,6 +227,10 @@ def _rules_provisions():
 
 def _normalize_rules(text: str) -> str:
     """
+    Whitespace / quote / dash canonicalization only — never a word change.
+    Applied to BOTH sides (the stored text and the PDF extraction), so it can
+    never hide a difference in wording, only in typesetting.
+
     normalize() (from the Act rebuild script) strips whitespace before
     ",.;:)]" but not before an em/en-dash — the Rules PDF's own
     typesetting glues a dash directly onto the preceding word ("shall—",
@@ -170,6 +248,9 @@ def _normalize_rules(text: str) -> str:
     # comma entirely ("rule,it may" for "rule, it may") — a PDF-extraction
     # artifact, not a wording difference. Insert it back before a letter.
     text = re.sub(r"(,)(?=[A-Za-z])", r"\1 ", text)
+    # Same artifact after a closing bracket: the Gazette prints
+    # "(5) Any matter", PyMuPDF sometimes reads "(5)Any matter".
+    text = re.sub(r"(\))(?=[A-Za-z])", r"\1 ", text)
     # A compound word hyphenated across a line-wrap ("non-\nadherence")
     # sometimes keeps a stray space after the hyphen once flattened to one
     # line ("non- adherence") instead of joining cleanly. Narrowly scoped
@@ -179,155 +260,261 @@ def _normalize_rules(text: str) -> str:
     return text
 
 
-# Rule 1(3)/(4), 13(5) and 23(1) were corrected per G.S.R. 892(E) (Phase
-# 4a) — their current text matches the base Rules PDF only after undoing
-# these specific, already-applied substitutions (the same pairs
-# scripts/apply_rules_corrigendum_2026-09-23.py extracted by code from the
-# corrigendum PDF and applied). No document contains the final combined
-# sentence as one literal string: the base PDF has the OLD phrase, and the
-# corrigendum PDF only has "for 'X', read 'Y'" fragments, not the full
-# reconstructed sentence.
+# Corrigendum G.S.R. 892(E) of 10 Dec 2025 corrected eight phrases in the
+# Rules. MeitY never re-published the Rules PDF, so the archived PDF this
+# check reads still prints the UNCORRECTED wording, while the database
+# (correctly) holds the corrected wording. Each pair is (what the database
+# says, what the PDF says) and is reverted before matching. All five distinct
+# substitutions are listed; items (v)(a)/(v)(b) affect the Fourth Schedule
+# only and are handled as scoped exceptions below instead, because the
+# strings involved are too short to substitute document-wide safely.
 _CORRIGENDUM_REVERSIONS = [
-    ("in the Official Gazette", "of this Gazette"),
-    ("Departments", "Department"),
-    ("given in such order", "given in such"),
+    ("in the Official Gazette", "of this Gazette"),      # item (i)(a) and (i)(b)
+    ("Departments", "Department"),                        # item (ii)
+    ("given in such order", "given in such"),             # item (iii)
+    ("every body", "everybody"),                          # item (iv)(a)
+    ("(18 of 2013)", "(18 or 2013)"),                     # item (iv)(b)
 ]
 
-# Small, pre-existing, real discrepancies found while writing this test —
-# each confirmed against the PDF with two independent extractors (PyMuPDF
-# and pypdf) agreeing, so these are not extraction ambiguities. None were
-# touched by Phase 4a (the corrigendum) or Phase 4b (the Schedule
-# restoration) — they predate this session's work and are too small to
-# correct unilaterally here without the same C1-C6-style rigor as
-# everything else this session did to the legal text. Documented as known
-# exceptions (so they don't mask a *real* future regression in these
-# rows) and flagged for Gautam's review in the final report.
-_KNOWN_EXCEPTIONS = {
-    # Rule 10(2)(c) ends "...(21 of 2000)." in the DB; the PDF has
-    # "...(21 of 2000); Illustration." — a semicolon, not a period.
-    "DPDPR-R10": [("2000).", "2000);")],
-    # First Schedule Part B item 4's lead-in is "The Consent Manager —" in
-    # the DB; the PDF has "The Consent Manager: —" (with a colon).
-    "DPDPR-SCH1": [("The Consent Manager -", "The Consent Manager: -")],
+# Reviewed, documented differences between the stored text and the official
+# PDF. Each entry is:
+#   (exact text the DATABASE holds, exact text the PDF holds, why, finding ID)
+# The exception applies ONLY while the database still holds that exact string.
+# Once a one-off data-fix script restores the official wording the exception
+# silently stops applying and the ordinary exact match passes — no test edit
+# needed, and no way for an exception to mask a new problem.
+#
+# "TO BE REMOVED BY" names the script that makes the entry obsolete.
+_KNOWN_EXCEPTIONS: dict[str, list[tuple[str, str, str, str]]] = {
+    # ---- pre-existing single-character differences (not yet corrected) ----
+    "DPDPR-R10": [
+        ("(21 of 2000).", "(21 of 2000);",
+         "Rule 10(2)(c) ends with a full stop in the database; the Gazette prints a "
+         "semicolon before the following Illustration.", "audit M-11 / pre-existing"),
+    ],
+    "DPDPR-SCH1": [
+        ("The Consent Manager- (a) shall", "The Consent Manager:- (a) shall",
+         "First Schedule Part B item 4's lead-in drops the Gazette's colon.",
+         "audit M-11 / pre-existing"),
+    ],
+    # ---- Fourth Schedule Note: corrigendum item (v), applied to the text but
+    # ---- not present in the archived pre-corrigendum PDF ----
+    "DPDPR-SCH4": [
+        ("(35 of 2019);", "(35 of 2019).",
+         "Corrigendum item (v)(a) turned the full stop ending item (a) into a semicolon.",
+         "audit H-5 (corrigendum item (v)(a))"),
+        ('(b) "allied healthcare', '(a) "allied healthcare',
+         "Corrigendum item (v)(b) relabelled the Note's items; the PDF prints two items "
+         "both labelled (a), which is the printing defect the corrigendum fixed.",
+         "audit H-5 (corrigendum item (v)(b))"),
+        ('(c) "clinical establishment"', '(b) "clinical establishment"',
+         "Corrigendum item (v)(b) relabelling.", "audit H-5 (corrigendum item (v)(b))"),
+        ('(d) "educational institution"', '(c) "educational institution"',
+         "Corrigendum item (v)(b) relabelling.", "audit H-5 (corrigendum item (v)(b))"),
+        ('(e) "healthcare professional"', '(d) "healthcare professional"',
+         "Corrigendum item (v)(b) relabelling.", "audit H-5 (corrigendum item (v)(b))"),
+        ('(f) "health services"', '(e) "health services"',
+         "Corrigendum item (v)(b) relabelling.", "audit H-5 (corrigendum item (v)(b))"),
+        ('(g) "mental health', '(f) "mental health',
+         "Corrigendum item (v)(b) relabelling.", "audit H-5 (corrigendum item (v)(b))"),
+    ],
+    # ---- Fifth/Sixth Schedule: the Gazette prints a separator dash after each
+    # ---- numbered paragraph heading ("1. Salary.-"); the database drops it.
+    # ---- TO BE REMOVED BY scripts/restore_verbatim_wording_2026-09-30.py
+    "DPDPR-SCH5": [
+        ("1. Salary.", "1. Salary.-", "heading separator dash dropped", "audit M-11"),
+        ("2. Provident Fund.", "2. Provident Fund.-", "heading separator dash dropped", "audit M-11"),
+        ("3. Pension and gratuity.", "3. Pension and gratuity.-",
+         "heading separator dash dropped", "audit M-11"),
+        ("4. Travelling allowance. (1)", "4. Travelling allowance.-(1)",
+         "heading separator dash dropped", "audit M-11"),
+        ("5. Medical assistance.", "5. Medical assistance.-",
+         "heading separator dash dropped", "audit M-11"),
+        ("6. Leave.", "6. Leave.-", "heading separator dash dropped", "audit M-11"),
+        ("7. Leave travel concession. (1)", "7. Leave travel concession.-(1)",
+         "heading separator dash dropped", "audit M-11"),
+        ("8. Other terms and conditions of service.", "8. Other terms and conditions of service.-",
+         "heading separator dash dropped", "audit M-11"),
+        ("matrix, namely:", "matrix, namely:-",
+         "run-in separator dash dropped before a list", "audit M-11"),
+        ("draw, namely:", "draw, namely:-",
+         "run-in separator dash dropped before a list", "audit M-11"),
+    ],
+    "DPDPR-SCH6": [
+        ("1. Classes of officials.", "1. Classes of officials.-",
+         "heading separator dash dropped", "audit M-11"),
+        ("2. Gratuity.", "2. Gratuity.-", "heading separator dash dropped", "audit M-11"),
+        ("3. Travelling allowance.", "3. Travelling allowance.-",
+         "heading separator dash dropped", "audit M-11"),
+        ("4. Medical assistance.", "4. Medical assistance.-",
+         "heading separator dash dropped", "audit M-11"),
+        ("5. Leave.", "5. Leave.-", "heading separator dash dropped", "audit M-11"),
+        ("6. Leave travel concession.", "6. Leave travel concession.-",
+         "heading separator dash dropped", "audit M-11"),
+        ("7. Other terms and conditions of service.", "7. Other terms and conditions of service.-",
+         "heading separator dash dropped", "audit M-11"),
+    ],
+    # ---- the one real paraphrase left in the corpus ----
+    # ---- TO BE REMOVED BY scripts/restore_verbatim_wording_2026-09-30.py
+    "DPDPR-SCH7": [
+        ("Data Principal for: (i) performance",
+         "Data Principal for the following purposes, namely:- (i) performance",
+         "Seventh Schedule, second row: five words of enacted text "
+         '("the following purposes, namely") were replaced by a colon. This is a '
+         "paraphrase inside provisions.full_text, which this project forbids.",
+         "audit H-7"),
+    ],
 }
 
-# Fifth/Sixth Schedule: EVERY numbered paragraph heading ("1. Salary.",
-# "2. Provident Fund.", ...) is followed directly by its first
-# sub-paragraph in the DB ("1. Salary. (1) The Chairperson..."); the PDF
-# has a dash between the heading and that first sub-paragraph throughout
-# ("1. Salary.- (1) The Chairperson...") — consistent with this
-# document's general "Heading.—" convention used elsewhere (e.g. Rule 1's
-# own heading). Systematic across every heading in both Schedules, not a
-# one-off, so handled as a haystack-side regex rather than one exception
-# pair per heading.
-_STRIP_HEADING_DASH = {"DPDPR-SCH5", "DPDPR-SCH6"}
-
-# The Fourth Schedule's Note is a special case, not a simple word swap:
-# the ORIGINAL government PDF prints two items both labelled "(a)" (a
-# genuine printing defect — G.S.R. 892(E) corrigendum item (v) relabels
-# the whole list (a)-(g) to fix it). Phase 4b's restoration applied that
-# corrigendum-corrected relabelling directly (verified separately, by the
-# restoration script's own checks) — so this Note's item labels in the
-# database intentionally do NOT match the uncorrected PDF's labels, only
-# each item's definitional wording does. Checked without leading labels.
-_STRIP_LEADING_LABEL = {"DPDPR-SCH4"}
+# Second gate on the fallback: how close, in order, the stored text must be to
+# the closest region of the PDF. Deliberately NOT the only gate — see
+# _ordered_match's docstring for why a similarity ratio alone is not enough.
+ORDERED_RATIO_MIN = 0.995
 
 
-def _check_piece(label, provision_id, text, base_pdf_norm) -> str | None:
+def _letters_only(text: str) -> str:
+    return re.sub(r"[^0-9A-Za-z]+", "", text)
+
+
+def _ordered_match(needle: str, haystack: str) -> tuple[bool, float, str | None]:
     """
-    Returns an error string if `text` (normalized) isn't found verbatim
-    in the base Rules PDF text, either directly, after reverting a known
-    G.S.R. 892(E) corrigendum correction (see _CORRIGENDUM_REVERSIONS),
-    after applying a documented pre-existing exception (see
-    _KNOWN_EXCEPTIONS), or — for the Fourth Schedule Note only — ignoring
-    the (deliberately relabelled) leading list-item label.
+    Does `needle` appear in `haystack` in the same WORD ORDER, with every
+    difference confined to punctuation or spacing?
+
+    Two independent gates, both of which must pass:
+
+    1. **Word order.** Align the two word-by-word and require every
+       difference to vanish once punctuation is stripped. This is the gate
+       that catches a changed meaning: "shall" -> "may", "six months" ->
+       "six years", or a dropped clause, at any passage length.
+    2. **Ordered similarity >= 99.5%** against the closest region of the PDF,
+       as a backstop against a match that has drifted.
+
+    Gate 2 on its own is not enough, which is why gate 1 exists: one word
+    swapped inside a 1,000-character clause still scores about 99.6%
+    similarity, and inside a 2,000-character clause about 99.8%.
+
+    Returns (passed, ratio, reason-if-failed).
+    """
+    if not needle:
+        return True, 1.0, None
+
+    # Locate the region of the PDF this piece belongs to, with padding so the
+    # alignment has room at both ends.
+    pad = 120
+    anchor = difflib.SequenceMatcher(None, haystack, needle, autojunk=False)
+    m = anchor.find_longest_match(0, len(haystack), 0, len(needle))
+    if m.size == 0:
+        return False, 0.0, "no comparable region found in the source PDF at all"
+    start = max(0, m.a - m.b - pad)
+    region = haystack[start:start + len(needle) + 2 * pad]
+
+    pdf_words, db_words = region.split(), needle.split()
+    ops = difflib.SequenceMatcher(None, pdf_words, db_words, autojunk=False).get_opcodes()
+    # The region is padded on purpose, so the first and last opcodes are
+    # normally "delete" — that is the surrounding PDF context, not a
+    # difference. Drop those two, and keep where the piece really aligns.
+    if ops and ops[0][0] == "delete" and ops[0][3] == 0:
+        ops = ops[1:]
+    if ops and ops[-1][0] == "delete" and ops[-1][4] == len(db_words):
+        ops = ops[:-1]
+    if not ops:
+        return False, 0.0, "no comparable region found in the source PDF at all"
+
+    for tag, i1, i2, j1, j2 in ops:
+        if tag == "equal":
+            continue
+        pdf_part = " ".join(pdf_words[i1:i2])
+        db_part = " ".join(db_words[j1:j2])
+        if _letters_only(pdf_part) != _letters_only(db_part):
+            return (
+                False, 0.0,
+                f"word difference — the PDF has {pdf_part[:90]!r} where the database "
+                f"has {db_part[:90]!r}",
+            )
+
+    tight_region = " ".join(pdf_words[ops[0][1]:ops[-1][2]])
+    ratio = difflib.SequenceMatcher(None, tight_region, needle, autojunk=False).ratio()
+    if ratio < ORDERED_RATIO_MIN:
+        return (
+            False, ratio,
+            f"only {ratio:.3%} ordered similarity to the closest region of the PDF "
+            f"(need at least {ORDERED_RATIO_MIN:.1%})",
+        )
+    return True, ratio, None
+
+
+def check_rules_piece(label: str, provision_id: str, text: str, base_pdf_norm: str) -> str | None:
+    """
+    Returns None if this piece of stored text is verbatim against the Rules
+    PDF, otherwise a one-line explanation of what differs.
+
+    Tried in order, most strict first:
+      1. exact normalized substring of the PDF;
+      2. the same after applying this provision's reviewed exceptions;
+      3. the same after reverting corrigendum G.S.R. 892(E) (the archived PDF
+         pre-dates it);
+      4. ordered word-level match with punctuation-only differences.
     """
     norm = _normalize_rules(text)
     if not norm:
         return None
-    for old, new in _KNOWN_EXCEPTIONS.get(provision_id, []):
-        norm = norm.replace(old, new)
-    if provision_id in _STRIP_HEADING_DASH:
-        base_pdf_norm = re.sub(r"\.-\s*", ". ", base_pdf_norm)
-    if provision_id in _STRIP_LEADING_LABEL:
-        norm = re.sub(r"^\([a-z]\)\s*", "", norm)
-        base_pdf_norm = re.sub(r"\(\s*[a-z]\s*\)\s*", "", base_pdf_norm)
-    if norm in base_pdf_norm:
-        return None
-    for new, old in _CORRIGENDUM_REVERSIONS:
-        if new in norm:
-            reverted = norm.replace(new, old)
-            if reverted in base_pdf_norm:
-                return None
-    # Last resort: word-coverage fallback. Exact substring matching is
-    # sensitive to every PDF line-wrap/dash/spacing quirk — several real
-    # ones were found and fixed above, but chasing each remaining
-    # Schedule-specific variant individually hit steep diminishing
-    # returns. A high coverage threshold (>=97% of this piece's own
-    # words individually found somewhere in the PDF text) is far more
-    # robust to that kind of noise while still failing hard on genuine
-    # paraphrase or invented content, which drops coverage well below
-    # this threshold, not by a percent or two.
-    words = norm.split()
-    if words:
-        pdf_word_set = set(base_pdf_norm.split())
-        found = sum(1 for w in words if w in pdf_word_set)
-        coverage = found / len(words)
-        # DPDPR-SCH4's items had their (a)-(g) labels deliberately
-        # restructured (see _STRIP_LEADING_LABEL above); stripping labels
-        # from the whole haystack occasionally clips a word at an item
-        # boundary, costing a point or two of coverage on otherwise-
-        # correct text already independently verified by Phase 4b's own
-        # restoration script. A slightly lower bar for this one known,
-        # already-explained case only.
-        threshold = 0.90 if provision_id in _STRIP_LEADING_LABEL else 0.97
-        if coverage >= threshold:
+
+    candidates: list[str] = [norm]
+
+    with_exceptions = norm
+    used_exception = False
+    for db_text, pdf_text, _reason, _finding in _KNOWN_EXCEPTIONS.get(provision_id, []):
+        if db_text in with_exceptions:
+            with_exceptions = with_exceptions.replace(db_text, pdf_text)
+            used_exception = True
+    if used_exception:
+        candidates.append(with_exceptions)
+
+    for candidate in list(candidates):
+        reverted = candidate
+        changed = False
+        for new, old in _CORRIGENDUM_REVERSIONS:
+            if new in reverted:
+                reverted = reverted.replace(new, old)
+                changed = True
+        if changed:
+            candidates.append(reverted)
+
+    for candidate in candidates:
+        if candidate in base_pdf_norm:
             return None
-        return (f"{label}: only {coverage:.0%} word coverage in the source PDF text "
-                f"(need >={threshold:.0%}) — {norm[:120]!r}...")
-    return f"{label}: not found verbatim (normalized) in the source PDF text — {norm[:120]!r}..."
+
+    best_ratio, best_reason = -1.0, "not found in the source PDF text"
+    for candidate in candidates:
+        ok, ratio, reason = _ordered_match(candidate, base_pdf_norm)
+        if ok:
+            return None
+        if ratio > best_ratio:
+            best_ratio, best_reason = ratio, reason
+    return f"{label}: {best_reason} — stored text begins {norm[:120]!r}"
 
 
-@pytest.mark.parametrize(
-    "provision_id, full_text", _rules_provisions(),
-    ids=[pid for pid, _ in _rules_provisions()],
-)
-def test_rules_row_matches_pdf_verbatim(provision_id, full_text):
+def rules_pieces(full_text: str) -> list[tuple[str, str]]:
     """
-    C1-style check: this row's text (paragraph by paragraph; table cells
-    individually), normalized, must be a contiguous substring of a fresh
-    extraction of the Rules PDF's English half (or, for the 3 corrigendum-
-    corrected rows, match after reverting that correction — see
-    _CORRIGENDUM_REVERSIONS). No section-boundary matching (unlike the
-    Act check) — just whole-document substring containment, which is
-    simple, robust, and virtually impossible to satisfy by coincidence
-    for real legal-clause-length text.
+    Split a provision's stored text into independently checkable pieces.
+    Returns (kind, text) where kind is 'para' or 'table cell'.
     """
-    _verify_source_hashes()
-    base_pdf_norm = _normalize_rules(_extract_rules_english_text())
-
-    body = full_text or ""
-
-    errors = []
-    for block in body.split("\n\n"):
+    pieces: list[tuple[str, str]] = []
+    for block in (full_text or "").split("\n\n"):
         block = block.strip()
         if not block:
             continue
         if block.startswith("*"):
             # A markdown heading/subtitle block (e.g. "**Second Schedule**
-            # *(see rules 5(1) and 16)*", or a second "**...**" sub-heading
-            # line) — these are this tracker's own presentational
-            # annotations, not positioned in the PDF the way body text is,
-            # so they're not checked here. (Skips a handful of legitimate
-            # "**Illustration.**"-style content labels too — an accepted,
-            # narrow coverage gap in exchange for not needing to special-
-            # case every heading shape.)
+            # *(see rules 5(1) and 16)*") — this tracker's own presentational
+            # annotations, not positioned in the PDF the way body text is.
             continue
         if block.startswith("|"):
-            # Markdown table: check each non-trivial cell independently —
-            # the PDF extracts a table column-by-column, not row-by-row,
-            # so the table's own row/column shape won't literally appear
-            # in the PDF text even though every cell's wording does.
+            # Markdown table: check each non-trivial cell independently — the
+            # PDF extracts a table column-by-column, not row-by-row, so the
+            # table's own shape won't appear in the PDF text even though every
+            # cell's wording does.
             for line in block.split("\n"):
                 if re.match(r"^\s*\|?\s*-+\s*(\|\s*-+\s*)*\|?\s*$", line):
                     continue  # separator row
@@ -335,12 +522,132 @@ def test_rules_row_matches_pdf_verbatim(provision_id, full_text):
                     cell = cell.strip()
                     if len(cell) < 8:  # skip trivial/short cells (numbers, dashes)
                         continue
-                    err = _check_piece(f"{provision_id} table cell", provision_id, cell, base_pdf_norm)
-                    if err:
-                        errors.append(err)
+                    pieces.append(("table cell", cell))
         else:
-            err = _check_piece(provision_id, provision_id, block, base_pdf_norm)
-            if err:
-                errors.append(err)
+            pieces.append(("para", block))
+    return pieces
 
+
+def check_rules_provision(provision_id: str, full_text: str, base_pdf_norm: str) -> list[str]:
+    errors = []
+    for kind, piece in rules_pieces(full_text):
+        label = provision_id if kind == "para" else f"{provision_id} {kind}"
+        err = check_rules_piece(label, provision_id, piece, base_pdf_norm)
+        if err:
+            errors.append(err)
+    return errors
+
+
+@pytest.fixture(scope="module")
+def rules_pdf_text() -> str:
+    """The Rules PDF's English half, extracted and normalized once for the
+    whole module (it was previously re-extracted for all 31 rows)."""
+    _verify_source_hashes()
+    return _normalize_rules(_extract_rules_english_text())
+
+
+@pytest.mark.parametrize(
+    "provision_id, full_text", _rules_provisions(),
+    ids=[pid for pid, _ in _rules_provisions()],
+)
+def test_rules_row_matches_pdf_verbatim(provision_id, full_text, rules_pdf_text):
+    """
+    This row's stored text (paragraph by paragraph; table cells individually),
+    normalized, must be a contiguous substring of a fresh extraction of the
+    Rules PDF's English half — or match it in word order with only
+    punctuation differing, or match after a reviewed exception or a
+    G.S.R. 892(E) reversion. See check_rules_piece.
+    """
+    errors = check_rules_provision(provision_id, full_text, rules_pdf_text)
     assert errors == [], "\n".join(errors)
+
+
+# Mutations that reverse or materially change the meaning of a rule. Every one
+# of these PASSED the old 97%-word-coverage check, because legal text reuses
+# its own vocabulary — that was audit finding C-2.
+RULES_MUTATIONS = [
+    ("mandatory_becomes_discretionary", "DPDPR-R19", "shall be", "may be"),
+    ("six_months_becomes_six_years", "DPDPR-R19", "six months", "six years"),
+    ("conflict_of_interest_ban_becomes_permission", "DPDPR-R19",
+     "shall not participate in or vote on", "may participate in and vote on"),
+    # Deliberately inside the longest block in the corpus (~1,650 characters).
+    # A similarity-ratio check alone would score this about 99.8% and let it
+    # through; the word-order gate catches it regardless of length.
+    ("word_swap_inside_a_very_long_block", "DPDPR-SCH5",
+     "The authority competent to sanction leave shall be",
+     "The authority competent to sanction leave may be"),
+]
+
+
+@pytest.mark.parametrize(
+    "provision_id, find, replace_with",
+    [(pid, find, rep) for _name, pid, find, rep in RULES_MUTATIONS],
+    ids=[name for name, _p, _f, _r in RULES_MUTATIONS],
+)
+def test_rules_check_fails_on_a_meaning_changing_word_swap(
+    provision_id, find, replace_with, rules_pdf_text
+):
+    """
+    NEGATIVE test (this is the C-2 regression test). Swap one word in a stored
+    provision and require the guard to report it.
+    """
+    stored = dict(_rules_provisions())[provision_id]
+    assert find in stored, f"{find!r} is no longer in {provision_id} — update this test"
+    mutated = stored.replace(find, replace_with, 1)
+
+    assert check_rules_provision(provision_id, stored, rules_pdf_text) == [], \
+        "the unmutated row should pass — the mutation test proves nothing otherwise"
+    errors = check_rules_provision(provision_id, mutated, rules_pdf_text)
+    assert errors != [], (
+        f"the guard PASSED {provision_id} with {find!r} changed to {replace_with!r} — "
+        "a meaning-changing word swap is exactly what it must catch"
+    )
+
+
+def test_a_dropped_clause_is_caught(rules_pdf_text):
+    """NEGATIVE test: removing words entirely must also be caught, not just
+    swapping them."""
+    stored = dict(_rules_provisions())["DPDPR-R19"]
+    mutated = stored.replace("One-third of the membership of the Board shall be the quorum",
+                              "the quorum", 1)
+    assert mutated != stored
+    assert check_rules_provision("DPDPR-R19", mutated, rules_pdf_text) != []
+
+
+def test_a_known_exception_only_applies_to_its_own_exact_text(rules_pdf_text):
+    """
+    The point of the exception format: an exception is keyed to the exact
+    string the database holds today. Change that string to something else and
+    the exception stops applying, so the guard fails instead of waving it
+    through. This is what stops a documented exception from hiding a new
+    problem in the same place.
+    """
+    stored = dict(_rules_provisions())["DPDPR-SCH7"]
+    assert "Data Principal for: (i) performance" in _normalize_rules(stored)
+    # Same shape as the H-7 exception, different (invented) wording.
+    mutated = stored.replace("of a Data Principal for:", "of a Data Principal only for:", 1)
+    assert mutated != stored
+    assert check_rules_provision("DPDPR-SCH7", mutated, rules_pdf_text) != []
+
+
+def test_every_known_exception_is_still_needed():
+    """
+    Housekeeping: an exception whose database text no longer exists is dead
+    weight and should be deleted (which is what happens once a data-fix
+    script restores the official wording). This test names the ones that have
+    become obsolete so nobody has to go looking.
+    """
+    stored_by_id = dict(_rules_provisions())
+    stale = []
+    for provision_id, entries in _KNOWN_EXCEPTIONS.items():
+        norm_all = " \n ".join(
+            _normalize_rules(piece) for _kind, piece in rules_pieces(stored_by_id.get(provision_id, ""))
+        )
+        for db_text, _pdf_text, _reason, finding in entries:
+            if db_text not in norm_all:
+                stale.append(f"{provision_id}: {db_text!r} ({finding})")
+    assert stale == [], (
+        "these reviewed exceptions no longer match anything in the database — the "
+        "wording has been corrected, so delete them from _KNOWN_EXCEPTIONS:\n"
+        + "\n".join(stale)
+    )

@@ -18,9 +18,17 @@ coordinates needed to separate body text from headers and side-margin
 notes. pypdf remains the independent SECOND extractor for the C2
 cross-check, exactly as specified.
 
+Checks vs. payload (fixed 30 Sep 2026, audit finding C-1): the C1/C2/C4
+checks below read each provision's `full_text` FROM THE DATABASE, which is
+the thing that has to stay verbatim. The PDF-derived text is only the
+payload `--apply` would write. Until 30 Sep 2026 the checks read the
+PDF-derived text on both sides, so they compared the PDF to itself and
+could never fail whatever the database said.
+
 Usage:
     python scripts/rebuild_act_verbatim_2026-09-23.py            # --dry-run (default)
     python scripts/rebuild_act_verbatim_2026-09-23.py --apply    # writes to db/dpdpa.db
+    python scripts/rebuild_act_verbatim_2026-09-23.py --db /tmp/copy.db --out-dir /tmp/out
 """
 from __future__ import annotations
 
@@ -39,7 +47,7 @@ import pypdf
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from db import get_connection, init_schema, next_id  # noqa: E402
+from db import DB_PATH as DEFAULT_DB_PATH, get_connection, init_schema, next_id  # noqa: E402
 
 PDF_PATH = PROJECT_ROOT / "docs" / "full_text" / "DPDP_Act_2023_official_2026-09-23.pdf"
 EXPECTED_SHA256 = "4deb23981d3010c8225a2ff6149e7243dc2268455b299e283afebdd7b72a7d15"
@@ -804,12 +812,33 @@ def run_checks(conn, rows, all_margin_notes_norm, source_body_words, reassembled
     all_ok = True
 
     for pid, row in rows.items():
-        full_text = render_full_text_for_row(pid, row)
-        row["_rendered"] = full_text
+        # The PDF-derived text is the payload --apply would WRITE. It is kept
+        # on the row for that purpose only -- never checked against itself.
+        row["_rendered"] = render_full_text_for_row(pid, row)
+
+        # C1/C2/C4 check what is actually STORED (audit finding C-1). A row
+        # that is missing from the database is a hard failure, not a crash.
+        db_row = conn.execute(
+            "SELECT full_text FROM provisions WHERE provision_id = ?", (pid,)
+        ).fetchone()
+        if db_row is None:
+            report["c1"][pid] = (False, f"{pid} is not in the database at all")
+            report["c2"][pid] = [(f"{pid} missing from the database", "FAILED")]
+            report["c4"][pid] = []
+            all_ok = False
+            continue
+        full_text = db_row["full_text"] or ""
 
         if row.get("is_schedule"):
+            # The Schedule is a 3-column table: markdown renders it row by row,
+            # the PDF reads it column by column, so contiguous-substring C1/C2
+            # can never match it. Its extraction is verified separately by the
+            # word-count and C5 penalty checks. C4 (the fabrication blacklist)
+            # still runs, now against the STORED text.
             report["c1"][pid] = (True, "n/a (table row-matched, see schedule extraction)")
             report["c4"][pid] = check_c4(full_text)
+            if report["c4"][pid]:
+                all_ok = False
             continue
 
         ok, body, haystack = check_c1(section_full_text, pid, full_text, row["section_nums"])
@@ -857,7 +886,18 @@ def render_full_text_for_row(pid, row):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true", help="write changes to db/dpdpa.db (default: dry-run)")
+    # --db and --out-dir exist so the permanent test can run these checks
+    # against a THROWAWAY COPY of the database and write its two report files
+    # to a temporary folder. Both default to exactly what the script always
+    # used, so running it by hand is unchanged.
+    parser.add_argument("--db", default=None, metavar="PATH",
+                        help="database to check (default: db/dpdpa.db)")
+    parser.add_argument("--out-dir", default=None, metavar="PATH",
+                        help="where to write the JSON/markdown reports (default: the repo root)")
     args = parser.parse_args()
+
+    db_path = Path(args.db) if args.db else DEFAULT_DB_PATH
+    out_dir = Path(args.out_dir) if args.out_dir else PROJECT_ROOT
 
     print("Verifying Act PDF SHA-256...")
     pdf_hash = verify_pdf_hash()
@@ -870,7 +910,7 @@ def main():
     print("Extracting via pypdf (second extractor, for C2)...")
     pypdf_text_norm = normalize(extract_pypdf_text(PDF_PATH))
 
-    conn = get_connection()
+    conn = get_connection(db_path)
     init_schema(conn)
 
     provision_ids = [f"DPDPA-S{n}" for n in range(1, 45)]  # not all exist as literal ids; just for reference
@@ -897,8 +937,8 @@ def main():
 
     print("\nAll checks C1-C5 passed.")
 
-    write_verbatim_json(rows, pdf_hash)
-    write_review_md(rows, report, section_full_text)
+    write_verbatim_json(rows, pdf_hash, out_dir)
+    write_review_md(rows, report, section_full_text, conn, out_dir)
 
     if not args.apply:
         print("\nDry run complete (no DB changes). Re-run with --apply to write changes.")
@@ -962,7 +1002,7 @@ def print_report_summary(report, rows):
         print(f"  {'OK' if ok else 'FAIL'} {sl} expected {expected!r} in {penalty!r}")
 
 
-def write_verbatim_json(rows, pdf_hash):
+def write_verbatim_json(rows, pdf_hash, out_dir=PROJECT_ROOT):
     data = {
         "pdf_path": str(PDF_PATH.relative_to(PROJECT_ROOT)),
         "pdf_sha256": pdf_hash,
@@ -979,13 +1019,18 @@ def write_verbatim_json(rows, pdf_hash):
             for pid, row in rows.items()
         },
     }
-    OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
-    OUT_JSON.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"Wrote {OUT_JSON}")
+    out_json = Path(out_dir) / OUT_JSON.relative_to(PROJECT_ROOT)
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    out_json.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"Wrote {out_json}")
 
 
-def write_review_md(rows, report, section_full_text):
-    conn = get_connection()
+def write_review_md(rows, report, section_full_text, conn=None, out_dir=PROJECT_ROOT):
+    # Reuses the caller's connection so this never silently reads a different
+    # database from the one the checks just ran against.
+    owns_conn = conn is None
+    if owns_conn:
+        conn = get_connection()
     lines = [
         "# Act verbatim rebuild -- 23 Sep 2026",
         "",
@@ -1062,10 +1107,12 @@ def write_review_md(rows, report, section_full_text):
                  "explicitly out of scope for this script (list, don't touch).")
     lines.append("")
 
-    REVIEW_MD.parent.mkdir(parents=True, exist_ok=True)
-    REVIEW_MD.write_text("\n".join(lines), encoding="utf-8")
-    conn.close()
-    print(f"Wrote {REVIEW_MD}")
+    review_md = Path(out_dir) / REVIEW_MD.relative_to(PROJECT_ROOT)
+    review_md.parent.mkdir(parents=True, exist_ok=True)
+    review_md.write_text("\n".join(lines), encoding="utf-8")
+    if owns_conn:
+        conn.close()
+    print(f"Wrote {review_md}")
 
 
 def apply_to_db(conn, rows):
