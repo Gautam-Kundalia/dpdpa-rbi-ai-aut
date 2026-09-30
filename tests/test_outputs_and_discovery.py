@@ -39,6 +39,7 @@ import discover_documents as dd
 import export_excel as ee
 import export_word as ew
 
+import db as db_module
 from conftest import seed_provision, seed_source_log
 
 RULES_SPEC = ew.DOCX_SPECS[0]
@@ -268,6 +269,88 @@ def test_watched_defaults_to_one_for_an_existing_row(conn):
     assert conn.execute(
         "SELECT watched FROM source_log WHERE document_id='SRC-0009'"
     ).fetchone()["watched"] == 1
+
+
+def _build_workbook(tmp_path, db_path, monkeypatch):
+    """Run the real exporter end to end against a throwaway database, and hand
+    back the workbook it wrote. Nothing touches data/DPDP_Rules_Tracker.xlsx."""
+    out = tmp_path / "out" / "tracker.xlsx"
+    monkeypatch.setattr(ee, "OUT_PATH", out)
+    monkeypatch.setattr(ee, "get_connection", lambda *a, **k: db_module.get_connection(db_path))
+    ee.main()
+    return openpyxl.load_workbook(out)
+
+
+def test_the_exported_source_log_sheet_really_leaves_the_retired_rows_out(tmp_path, monkeypatch):
+    """
+    The M-5 check, made to exercise the EXPORTER rather than to re-type its
+    query. The first version of this test ran its own
+    "SELECT ... WHERE watched = 1" and compared the answer with itself, so
+    deleting the filter from export_excel.py left every test green. This one
+    reads the Source_Log sheet out of the workbook the exporter actually wrote.
+    """
+    db_path = tmp_path / "m5.db"
+    conn = db_module.get_connection(db_path)
+    db_module.init_schema(conn)
+    seed_provision(conn, provision_id="DPDPR-R23", full_text="given in such order.")
+    seed_source_log(conn, document_id="SRC-0001", url="https://example.test/watched.pdf")
+    seed_source_log(conn, document_id="SRC-0005", url="https://example.test/retired.pdf")
+    conn.execute("UPDATE source_log SET watched = 0 WHERE document_id = 'SRC-0005'")
+    conn.commit()
+    conn.close()
+
+    wb = _build_workbook(tmp_path, db_path, monkeypatch)
+    sheet = wb["Source_Log"]
+    id_col = ee.SL_COLS.index("document_id") + 1
+    shown = [sheet.cell(row=r, column=id_col).value for r in range(2, sheet.max_row + 1)]
+    shown = [v for v in shown if v]
+    assert shown == ["SRC-0001"], shown
+
+
+def test_the_tracker_can_be_rebuilt_on_a_database_that_predates_the_watched_column(
+    tmp_path, monkeypatch
+):
+    """
+    Hard rule 9: an old-schema copy must upgrade cleanly and leave its rows
+    alone.
+
+    This is also a real break that reached a commit. `export_excel.py` reads
+    `source_log WHERE watched = 1`, but only `run_pipeline.py` ever applied the
+    migration that adds that column — so "python src/export_excel.py" on the
+    committed database (which has no `watched` column) died with
+    "sqlite3.OperationalError: no such column: watched". Regenerating the
+    tracker by hand is exactly what the hand-over instructions ask for, so this
+    would have failed on the first try.
+    """
+    db_path = tmp_path / "old_schema.db"
+    conn = db_module.get_connection(db_path)
+    db_module.init_schema(conn)
+    seed_provision(conn, provision_id="DPDPR-R23", full_text="given in such order.")
+    seed_source_log(conn, document_id="SRC-0001", url="https://example.test/watched.pdf",
+                    content_hash="keep-me", processing_status="Processed")
+    conn.commit()
+
+    # Wind the schema back to before the migration, the way the committed
+    # database still looks today.
+    conn.execute("ALTER TABLE source_log DROP COLUMN watched")
+    conn.commit()
+    before = conn.execute("SELECT * FROM source_log").fetchall()
+    assert "watched" not in before[0].keys()
+    before_values = [dict(r) for r in before]
+    conn.close()
+
+    wb = _build_workbook(tmp_path, db_path, monkeypatch)
+
+    check = db_module.get_connection(db_path)
+    after = [dict(r) for r in check.execute("SELECT * FROM source_log").fetchall()]
+    # The column arrived, defaulted to "still watched", and nothing else moved.
+    assert all(r["watched"] == 1 for r in after)
+    assert [{k: v for k, v in r.items() if k != "watched"} for r in after] == before_values
+    check.close()
+
+    sheet = wb["Source_Log"]
+    id_col = ee.SL_COLS.index("document_id") + 1
+    assert sheet.cell(row=2, column=id_col).value == "SRC-0001"
 
 
 # --------------------------------------------------------------------------

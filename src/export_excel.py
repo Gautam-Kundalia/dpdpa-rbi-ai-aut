@@ -17,7 +17,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
-from db import PROJECT_ROOT, get_connection
+from db import PROJECT_ROOT, get_connection, init_schema
 from export_word import fetch_amendments
 
 FONT_NAME = "Arial"
@@ -230,6 +230,16 @@ def add_last_regulatory_change_column(ws, provisions, last_reg_changes):
 
 def main():
     conn = get_connection()
+    # Bring an older database up to date before reading it. This exporter is
+    # run by hand as well as by run_pipeline.py, and by hand it is usually the
+    # FIRST thing run after a code update — so it can be the first code to meet
+    # a database that predates a column it needs. Without this, regenerating
+    # the tracker on a freshly pulled repository died with
+    # "sqlite3.OperationalError: no such column: watched", because the watched
+    # column (audit finding M-5) is added by a migration that only
+    # run_pipeline.py used to apply. init_schema is additive and safe to call
+    # every time: it adds nothing that is already there and changes no row.
+    init_schema(conn)
 
     provisions = conn.execute(f"SELECT {','.join(MP_COLS)} FROM provisions ORDER BY sort_order").fetchall()
     changes = conn.execute(f"SELECT {','.join(CL_COLS)} FROM change_log ORDER BY detected_timestamp").fetchall()
