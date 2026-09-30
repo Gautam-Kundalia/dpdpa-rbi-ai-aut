@@ -279,6 +279,60 @@ still start it hours late, a scheduler-queueing effect outside this
 pipeline's control), and can also be triggered manually from the Actions
 tab (`workflow_dispatch`).
 
+## Heartbeat — how you find out if the whole thing goes quiet
+
+A **heartbeat** is a small "I'm alive" signal the daily job sends to an outside
+service every time it finishes. If that service stops hearing from it, *the
+service emails you*. It is the alarm that fires when a signal **doesn't**
+arrive, which is the one kind of alarm this project could not raise for itself.
+
+**Why it is needed.** Every warning this project produces travels down exactly
+one channel: the daily summary email over Gmail. That channel can itself fail,
+and when it does the result is silence — which looks exactly like a quiet day
+with no changes. All of these produce silence, and none of them could tell you:
+
+| What goes wrong | What you would have seen before |
+|---|---|
+| The Gmail app password expires or is revoked | Nothing, indefinitely |
+| The daily `git push` is rejected | An email that says nothing about it |
+| GitHub disables the schedule (it does this to public repositories after 60 days of no activity) | Nothing |
+| The job crashes before it can send anything | Nothing |
+
+**What it does and does not cover.** It covers all four of the above, because
+it is the *absence* of the ping that raises the alarm. It does **not** tell you
+anything about the content of a run — a run that succeeds but finds nothing
+still pings normally. It is a liveness check, not a correctness check.
+
+**Setting it up (about five minutes, and free).**
+
+1. Go to <https://healthchecks.io> and create a free account. (cron-job.org and
+   several others work the same way; the instructions below are for
+   healthchecks.io.)
+2. Click **Add Check**. Name it something like `DPDP daily check`.
+3. Set **Period** to `1 day` — how often it should expect to hear from the job.
+4. Set **Grace Time** to `6 hours`. GitHub's scheduler can start a job hours
+   late, and a false alarm every time it does would teach you to ignore the
+   real one.
+5. Make sure the check's email notification is switched on and pointed at your
+   address.
+6. Copy the check's **ping URL**. It looks like
+   `https://hc-ping.com/` followed by a long random string. **Treat it as a
+   password** — anyone with it can pretend to be your job.
+7. In GitHub, go to the repository → **Settings** → **Secrets and variables** →
+   **Actions** → **New repository secret**. Name it exactly `HEARTBEAT_URL`,
+   paste the ping URL as the value, and save.
+8. Go to the **Actions** tab → "Daily DPDP regulatory change check" → **Run
+   workflow**. When it finishes, healthchecks.io should show the check as "up"
+   with a ping just now.
+
+Until that secret exists, the workflow still runs normally and prints a visible
+warning in the job log saying the heartbeat is not set up. It never fails the
+job over it, and it never prints the URL itself.
+
+**If a run fails**, the workflow pings `<your ping URL>/fail` instead, which
+healthchecks.io treats as "this job ran and went wrong" and alerts on
+immediately rather than waiting for the next missed ping.
+
 ## Document discovery — what happens when a *new* document appears
 
 Real DPDP law changes almost never edit one of the four URLs above — they show

@@ -76,6 +76,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import time
 from dataclasses import dataclass
 from datetime import date
 
@@ -94,6 +95,17 @@ USER_AGENT = "Mozilla/5.0 (compatible; DPDPAChangeMonitor/1.0)"
 # even at 60s, the next step is a short retry-with-backoff, not a further
 # blind increase.
 TIMEOUT = 60
+
+# One retry, after a short pause, before calling a fetch a failure (audit
+# finding M-3). e-Gazette in particular failed on roughly 30% of recorded
+# production days, which made error emails routine — and a routine error email
+# is one nobody reads, which is how the important one gets missed. The comment
+# on TIMEOUT above already said "the next step is a short retry-with-backoff,
+# not a further blind increase"; this is that step. Deliberately ONE retry: the
+# job runs once a day, so a source that is genuinely down stays down, and there
+# is no value in hammering a government website.
+FETCH_RETRIES = 1
+FETCH_RETRY_WAIT_SECONDS = 8
 
 # ==========================================================================
 # WHICH SOURCE IS ALLOWED TO CHANGE WHICH LAW  (audit finding C-4)
@@ -254,6 +266,75 @@ def _fetch_raw(url: str) -> bytes:
     return resp.content
 
 
+def _fetch_and_extract(url: str, kind: str) -> tuple[str, str]:
+    """
+    Download and extract one source's text, retrying once after a short pause.
+    Returns (text, sha256-of-text). Raises the LAST exception if every attempt
+    failed, so the caller still reports a real failure.
+    """
+    last_error: Exception | None = None
+    for attempt in range(FETCH_RETRIES + 1):
+        try:
+            text = _extract_text(_fetch_raw(url), kind)
+            # Hash the extracted/cleaned text, not raw bytes — raw PDF bytes
+            # and raw HTML can churn from irrelevant noise (PDF regeneration
+            # metadata, analytics script tokens) even when the substantive
+            # content is unchanged.
+            return text, hashlib.sha256(text.encode("utf-8")).hexdigest()
+        except Exception as exc:
+            last_error = exc
+            if attempt < FETCH_RETRIES:
+                print(f"[fetch_sources] attempt {attempt + 1} failed for {url} ({exc}); "
+                      f"waiting {FETCH_RETRY_WAIT_SECONDS}s and trying once more.")
+                time.sleep(FETCH_RETRY_WAIT_SECONDS)
+    raise last_error
+
+
+def _error_signature(url: str, exc: Exception) -> str:
+    """
+    A short, stable label for "this same problem again": the source and the kind
+    of failure, never the full message (which often carries a changing timestamp
+    or port number and would make every day look like a brand-new problem).
+    """
+    return f"{url}|{type(exc).__name__}"
+
+
+def _record_error_streak(conn, document_id: str, signature: str, today: str) -> int:
+    """
+    Count how many consecutive DAYS this same problem has happened, and return
+    that count. 1 means "new today". Two runs on the same day do not count twice.
+    """
+    row = conn.execute(
+        "SELECT error_signature, error_streak_days, error_streak_last_date "
+        "FROM source_log WHERE document_id = ?",
+        (document_id,),
+    ).fetchone()
+    if row is None:
+        days = 1
+    elif row["error_signature"] != signature:
+        days = 1                      # a different problem: start counting again
+    elif row["error_streak_last_date"] == today:
+        days = row["error_streak_days"] or 1    # already counted today
+    else:
+        days = (row["error_streak_days"] or 0) + 1
+    conn.execute(
+        "UPDATE source_log SET error_signature = ?, error_streak_days = ?, "
+        "error_streak_last_date = ? WHERE document_id = ?",
+        (signature, days, today, document_id),
+    )
+    conn.commit()
+    return days
+
+
+def _clear_error_streak(conn, document_id: str) -> None:
+    conn.execute(
+        "UPDATE source_log SET error_signature = NULL, error_streak_days = 0, "
+        "error_streak_last_date = NULL WHERE document_id = ?",
+        (document_id,),
+    )
+    conn.commit()
+
+
 def _existing_row(conn, url: str):
     return conn.execute(
         "SELECT document_id, content_hash FROM source_log WHERE url = ?", (url,)
@@ -312,7 +393,8 @@ def _upsert_source_log(conn, *, url, source, title, published_date, fetched_date
     return doc_id
 
 
-def fetch_all(conn=None, fetch_errors: list[str] | None = None) -> list[FetchResult]:
+def fetch_all(conn=None, fetch_errors: list[str] | None = None,
+              repeated_errors: list[str] | None = None) -> list[FetchResult]:
     """
     Fetch every configured source. For each: hash it, compare to the last
     known hash for that URL, and insert a source_log row.
@@ -337,13 +419,7 @@ def fetch_all(conn=None, fetch_errors: list[str] | None = None) -> list[FetchRes
     for src in SOURCES:
         url = src["url"]
         try:
-            raw = _fetch_raw(url)
-            text = _extract_text(raw, src["kind"])
-            # Hash the extracted/cleaned text, not raw bytes — raw PDF bytes
-            # and raw HTML can churn from irrelevant noise (PDF regeneration
-            # metadata, analytics script tokens) even when the substantive
-            # content is unchanged.
-            content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            text, content_hash = _fetch_and_extract(url, src["kind"])
         except Exception as exc:
             # Keep the last good hash on a fetch failure, don't blank it —
             # writing NULL here made the *next successful* fetch look like a
@@ -351,14 +427,24 @@ def fetch_all(conn=None, fetch_errors: list[str] | None = None) -> list[FetchRes
             # actually changed.
             existing_before_error = _existing_row(conn, url)
             last_good_hash = existing_before_error["content_hash"] if existing_before_error else None
-            _upsert_source_log(
+            doc_id = _upsert_source_log(
                 conn, url=url, source=src["source"], title=src["title"],
                 published_date=None, fetched_date=today,
                 content_hash=last_good_hash, processing_status="Error",
             )
-            print(f"[fetch_sources] ERROR fetching {src['source']} ({url}): {exc}")
+            days = _record_error_streak(conn, doc_id, _error_signature(url, exc), today)
+            print(f"[fetch_sources] ERROR fetching {src['source']} ({url}): {exc} "
+                  f"(day {days} of this same problem)")
             if fetch_errors is not None:
-                fetch_errors.append(f"fetch failed for {src['source']} ({url}): {exc}")
+                suffix = f" [same problem for {days} days running]" if days > 1 else ""
+                message = f"fetch failed for {src['source']} ({url}): {exc}{suffix}"
+                fetch_errors.append(message)
+                # Day 1 is news. Day 3 and beyond is news again, because by then
+                # it is not going to fix itself. Days in between are still in the
+                # email body, just not shouted about on the subject line
+                # (audit M-3).
+                if repeated_errors is not None and 1 < days < 3:
+                    repeated_errors.append(message)
             continue
 
         existing = _existing_row(conn, url)
@@ -372,6 +458,7 @@ def fetch_all(conn=None, fetch_errors: list[str] | None = None) -> list[FetchRes
             processing_status="New" if is_changed else "No Change Detected",
             content_text=text,
         )
+        _clear_error_streak(conn, doc_id)
 
         if is_changed:
             changed.append(

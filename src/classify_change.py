@@ -48,6 +48,27 @@ VALID_CHANGE_TYPES = {"New Provision", "Amendment", "Repeal", "Clarification", "
 # where a malformed response is no longer expected.
 MAX_CLASSIFY_ATTEMPTS = 3
 
+# Only these are worth trying again (audit finding M-2). Everything else is a
+# decision, not an accident: if the model's reply fails the verbatim checks, or
+# names a provision that does not exist, asking the same question again will get
+# the same answer — it just costs three times as much. Before 30 Sep 2026 every
+# failure was retried twice over, so a deterministic rejection was paid for
+# three times.
+RETRYABLE_API_ERRORS = tuple(
+    cls for cls in (
+        getattr(anthropic, name, None) for name in (
+            "APIConnectionError",      # could not reach the API at all
+            "APITimeoutError",         # reached it, no answer in time
+            "RateLimitError",          # asked to slow down
+            "InternalServerError",     # the API broke (HTTP 5xx)
+            "OverloadedError",         # the API is busy
+            "ServiceUnavailableError",
+            "DeadlineExceededError",
+            "RetryableError",
+        )
+    ) if isinstance(cls, type) and issubclass(cls, BaseException)
+)
+
 MAX_PROMPT_CHARS = 20_000
 DEVANAGARI_RE = re.compile(r"[ऀ-ॿ]")
 HINDI_DROP_THRESHOLD = 0.30
@@ -564,7 +585,9 @@ def classify(
 
     last_error = None
     last_raw = None
+    attempts_used = 0
     for attempt in range(MAX_CLASSIFY_ATTEMPTS):
+        attempts_used = attempt + 1
         parsed = None
         try:
             parsed = _call_claude(user_prompt)
@@ -590,6 +613,13 @@ def classify(
             last_error = exc
             last_raw = parsed
             print(f"[classify_change] attempt {attempt + 1} failed for {fetch_result.document_id}: {exc}")
+            if not isinstance(exc, RETRYABLE_API_ERRORS):
+                # A deterministic failure (audit M-2): the reply was
+                # well-formed but wrong, or the request itself is impossible.
+                # Retrying buys nothing and costs another call.
+                print(f"[classify_change] not retrying — {type(exc).__name__} is a decision, "
+                      f"not a transient failure.")
+                break
 
     conn.execute(
         "UPDATE source_log SET processing_status = 'Error' WHERE document_id = ?",
@@ -600,8 +630,8 @@ def classify(
     # str() it before slicing so a shape/validation failure (_validate raised
     # after a successful, well-formed tool call) still shows what came back.
     raw_snippet = f" — raw model output: {str(last_raw)[:300]!r}" if last_raw else ""
-    print(f"[classify_change] giving up on {fetch_result.document_id} after {MAX_CLASSIFY_ATTEMPTS} attempts: {last_error}{raw_snippet}")
+    print(f"[classify_change] giving up on {fetch_result.document_id} after {attempts_used} attempt(s): {last_error}{raw_snippet}")
     raise ClassificationFailed(
         f"could not get a valid classification for {fetch_result.document_id} "
-        f"({fetch_result.source} — {fetch_result.url}) after {MAX_CLASSIFY_ATTEMPTS} attempts: {last_error!r}{raw_snippet}"
+        f"({fetch_result.source} — {fetch_result.url}) after {attempts_used} attempt(s): {last_error!r}{raw_snippet}"
     ) from last_error

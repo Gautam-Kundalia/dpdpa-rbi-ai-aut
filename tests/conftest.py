@@ -19,6 +19,18 @@ import pytest
 import db as db_module
 
 
+@pytest.fixture(autouse=True)
+def no_real_waiting(monkeypatch):
+    """
+    fetch_sources retries a failed download once after an 8-second pause
+    (audit M-3). That pause is real time, and the suite has several tests that
+    simulate every source failing — which added a minute to every run. Set the
+    pause to zero everywhere; the retry itself is still exercised.
+    """
+    import fetch_sources as fs_module
+    monkeypatch.setattr(fs_module, "FETCH_RETRY_WAIT_SECONDS", 0)
+
+
 @pytest.fixture
 def conn(tmp_path):
     """A fresh, schema-initialized SQLite connection backed by a temp file."""

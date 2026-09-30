@@ -72,7 +72,23 @@ CREATE TABLE IF NOT EXISTS source_log (
     content_hash              TEXT,                  -- sha256 of fetched content, for change detection
     processing_status         TEXT NOT NULL DEFAULT 'New' CHECK (processing_status IN
                         ('New','Processed','No Change Detected','Error')),
-    linked_change_ids           TEXT                   -- comma-separated change_ids produced from this doc
+    linked_change_ids           TEXT,                  -- comma-separated change_ids produced from this doc
+    watched                      INTEGER NOT NULL DEFAULT 1,
+                                                       -- 1 = still being checked every day; 0 = kept only for
+                                                       -- its linked_change_ids history (a URL that was
+                                                       -- one-off, superseded or retired). The Excel
+                                                       -- Source_Log sheet shows only watched = 1 rows,
+                                                       -- because it says it shows "what is being watched
+                                                       -- right now" (audit M-5).
+    error_signature               TEXT,                 -- a short, stable label for the CURRENT fetch problem
+    error_streak_days              INTEGER NOT NULL DEFAULT 0,
+                                                       -- how many consecutive days that same problem has
+                                                       -- happened. Used so a source that has been down for
+                                                       -- a week stops dominating the email subject line
+                                                       -- every day, while still appearing in the body
+                                                       -- (audit M-3). Reset to 0 on any successful fetch.
+    error_streak_last_date          TEXT                -- the date the streak was last counted, so two runs
+                                                       -- on the same day do not count twice
 );
 
 CREATE TABLE IF NOT EXISTS source_snapshot (

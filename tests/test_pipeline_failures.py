@@ -24,6 +24,13 @@ from classify_change import ClassificationFailed
 
 from conftest import FakeFetchResult, seed_provision, seed_source_log
 
+# The URL matters now: apply() refuses a change from a source that is not
+# allowed to make it (audit C-4). The official MeitY Rules PDF is the only
+# source allowed to change a DPDPR-* row, so that is what these tests use.
+RULES_PDF_URL = fs.SOURCES[1]["url"]
+PIB_URL = fs.SOURCES[0]["url"]
+EGAZETTE_HOME_URL = fs.RETIRED_SOURCES[0]["url"]
+
 
 # --------------------------------------------------------------------------
 # fetch_sources.py: download error handling
@@ -214,6 +221,200 @@ def test_a_source_with_history_but_no_baseline_is_a_loud_error(conn, tmp_path):
 
 
 # --------------------------------------------------------------------------
+# run_pipeline.py: an apply() failure rolls the whole source back (audit H-2)
+# --------------------------------------------------------------------------
+
+# Rule 1's real text, which contains the phrase "of publication in the Official
+# Gazette" TWICE — once in sub-rule (3) and once in (4). apply_change refuses to
+# touch a span that appears more than once, which is the deliberate safety
+# refusal that used to lose the change forever.
+R1_TEXT = (
+    "(3) Rules 2, 4, 17 to 21 shall come into force on the date of publication in the "
+    "Official Gazette.\n\n"
+    "(4) Rules 3, 5 to 16, 22 and 23 shall come into force eighteen months after the "
+    "date of publication in the Official Gazette."
+)
+AMBIGUOUS_CHANGE = {
+    "provision_id": "DPDPR-R1", "change_type": "Amendment",
+    "old_value_summary": "a", "new_value_summary": "b",
+    "old_full_text": "of publication in the Official Gazette",
+    "new_full_text": "of publication of this Gazette",
+    "confidence_score": 0.9,
+}
+OLD_BASELINE = "Rule 1.\n" + R1_TEXT
+NEW_FETCH = OLD_BASELINE + "\nof publication of this Gazette"
+
+
+def _seed_rule_1(conn, document_id="SRC-0001"):
+    seed_provision(conn, provision_id="DPDPR-R1", reference="Rule 1",
+                    full_text=R1_TEXT, full_text_anchor="DPDPR_R1")
+    seed_source_log(conn, document_id=document_id, url=RULES_PDF_URL,
+                     content_hash="NEWHASH", processing_status="New")
+    conn.execute(
+        "INSERT INTO source_snapshot (document_id, content_hash, content_text, fetched_date) "
+        "VALUES (?, 'OLDHASH', ?, '2026-09-29')",
+        (document_id, OLD_BASELINE),
+    )
+    conn.commit()
+
+
+def _run_with_reply(db_path, fr, reply):
+    import db as db_module
+    with patch.object(rp, "get_connection", lambda: db_module.get_connection(db_path)), \
+         patch.object(rp, "fetch_all", return_value=[fr]), \
+         patch.object(cc, "_call_claude", return_value=reply), \
+         patch.object(rp, "discover_all", return_value=([], [])), \
+         patch.object(rp, "send_summary") as mock_notify:
+        rc = rp.main()
+    return rc, mock_notify
+
+
+def test_a_refused_apply_rolls_back_the_fingerprint_and_the_baseline(conn, tmp_path):
+    """
+    Audit finding H-2. apply_change refuses to replace a span that appears more
+    than once — a deliberate safety rule. Before this fix, the fingerprint and
+    the baseline had already moved on by then, so the next run saw no change and
+    the detected amendment was gone for good. You got one error email, on one
+    day, and that was your only chance to notice.
+    """
+    _seed_rule_1(conn)
+    conn.close()
+
+    db_path = tmp_path / "test.db"
+    fr = FakeFetchResult(source="MeitY", document_id="SRC-0001", url=RULES_PDF_URL,
+                          content_text=NEW_FETCH, content_hash="NEWHASH", prior_hash="OLDHASH")
+    rc, mock_notify = _run_with_reply(db_path, fr, {"changes": [AMBIGUOUS_CHANGE]})
+
+    assert rc == 1
+    errors = mock_notify.call_args[0][1]
+    assert any("matches the current full_text 2 time" in e for e in errors), errors
+
+    import db as db_module
+    conn2 = db_module.get_connection(db_path)
+    assert conn2.execute(
+        "SELECT content_hash FROM source_log WHERE document_id = 'SRC-0001'"
+    ).fetchone()["content_hash"] == "OLDHASH", \
+        "the fingerprint must roll back, or tomorrow's run sees no change"
+    snap = conn2.execute(
+        "SELECT content_hash, content_text FROM source_snapshot WHERE document_id = 'SRC-0001'"
+    ).fetchone()
+    assert snap["content_hash"] == "OLDHASH"
+    assert snap["content_text"] == OLD_BASELINE, \
+        "the baseline must roll back, or tomorrow's diff is empty"
+    assert conn2.execute("SELECT COUNT(*) c FROM change_log").fetchone()["c"] == 0
+    assert conn2.execute(
+        "SELECT processing_status FROM source_log WHERE document_id = 'SRC-0001'"
+    ).fetchone()["processing_status"] == "Error"
+    conn2.close()
+
+
+def test_the_retry_the_next_day_sees_the_change_again(conn, tmp_path):
+    """The point of the rollback: run the same day twice and the second run must
+    still see something to look at, not an empty diff."""
+    _seed_rule_1(conn)
+    conn.close()
+
+    db_path = tmp_path / "test.db"
+    fr = FakeFetchResult(source="MeitY", document_id="SRC-0001", url=RULES_PDF_URL,
+                          content_text=NEW_FETCH, content_hash="NEWHASH", prior_hash="OLDHASH")
+    _run_with_reply(db_path, fr, {"changes": [AMBIGUOUS_CHANGE]})
+
+    # Second run, same fetch (the fingerprint rolled back, so fetch_all would
+    # report this source as changed again).
+    rc, mock_notify = _run_with_reply(db_path, fr, {"changes": [AMBIGUOUS_CHANGE]})
+    assert rc == 1, "the second run must still notice the change, not report a quiet day"
+    errors = mock_notify.call_args[0][1]
+    assert any("matches the current full_text 2 time" in e for e in errors), errors
+
+
+def test_a_source_with_no_baseline_at_all_is_not_left_with_one(conn, tmp_path):
+    """
+    Edge case of the rollback: if there was no baseline before the run, there
+    must be none after a failed apply either. Leaving today's text behind would
+    make tomorrow's diff empty — the very failure this guards against.
+    """
+    seed_provision(conn, provision_id="DPDPR-R1", reference="Rule 1",
+                    full_text=R1_TEXT, full_text_anchor="DPDPR_R1")
+    seed_source_log(conn, document_id="SRC-0001", url=RULES_PDF_URL,
+                     content_hash="NEWHASH", processing_status="New")
+    conn.close()
+
+    db_path = tmp_path / "test.db"
+    # prior_hash=None means "first sighting", so classify stores a baseline and
+    # returns nothing — no apply, nothing to roll back. Force the apply path by
+    # giving it history AND a hand-made baseline is what the test above does;
+    # here the baseline is genuinely absent but history exists, which now raises
+    # ClassificationFailed. Assert the fingerprint rolls back and no baseline is
+    # left behind.
+    fr = FakeFetchResult(source="MeitY", document_id="SRC-0001", url=RULES_PDF_URL,
+                          content_text=NEW_FETCH, content_hash="NEWHASH", prior_hash="OLDHASH")
+    rc, _mock = _run_with_reply(db_path, fr, {"changes": []})
+    assert rc == 1
+
+    import db as db_module
+    conn2 = db_module.get_connection(db_path)
+    assert conn2.execute("SELECT COUNT(*) c FROM source_snapshot").fetchone()["c"] == 0
+    assert conn2.execute(
+        "SELECT content_hash FROM source_log WHERE document_id = 'SRC-0001'"
+    ).fetchone()["content_hash"] == "OLDHASH"
+    conn2.close()
+
+
+def test_reprocessing_after_a_partial_failure_does_not_duplicate(conn, tmp_path):
+    """
+    The deliberate choice recorded in run_pipeline: when one change out of
+    several fails, the ones that applied are KEPT and only the fingerprint and
+    baseline roll back. That is only safe if re-processing cannot apply the same
+    change twice — and it cannot, because apply_change refuses unless
+    old_full_text appears in the current text exactly once. Once applied, it
+    appears zero times.
+    """
+    seed_provision(conn, provision_id="DPDPR-R23", reference="Rule 23(1)",
+                    full_text="given in such.", full_text_anchor="DPDPR_R23")
+    seed_provision(conn, provision_id="DPDPR-R1", reference="Rule 1",
+                    full_text=R1_TEXT, full_text_anchor="DPDPR_R1", sort_order=2)
+    seed_source_log(conn, document_id="SRC-0001", url=RULES_PDF_URL,
+                     content_hash="NEWHASH", processing_status="New")
+    good = {
+        "provision_id": "DPDPR-R23", "change_type": "Correction",
+        "old_value_summary": "a", "new_value_summary": "b",
+        "old_full_text": "given in such.", "new_full_text": "given in such order.",
+        "confidence_score": 0.9,
+    }
+    text = "given in such order.\n" + NEW_FETCH
+    conn.execute(
+        "INSERT INTO source_snapshot (document_id, content_hash, content_text, fetched_date) "
+        "VALUES ('SRC-0001', 'OLDHASH', ?, '2026-09-29')", ("given in such.\n" + OLD_BASELINE,))
+    conn.commit()
+    conn.close()
+
+    db_path = tmp_path / "test.db"
+    fr = FakeFetchResult(source="MeitY", document_id="SRC-0001", url=RULES_PDF_URL,
+                          content_text=text, content_hash="NEWHASH", prior_hash="OLDHASH")
+    reply = {"changes": [good, AMBIGUOUS_CHANGE]}
+
+    rc1, _ = _run_with_reply(db_path, fr, reply)
+    assert rc1 == 1
+
+    import db as db_module
+    conn2 = db_module.get_connection(db_path)
+    after_first = conn2.execute("SELECT COUNT(*) c FROM change_log").fetchone()["c"]
+    assert after_first == 1, "the change that worked is kept"
+    conn2.close()
+
+    rc2, _ = _run_with_reply(db_path, fr, reply)
+    assert rc2 == 1
+
+    conn3 = db_module.get_connection(db_path)
+    assert conn3.execute("SELECT COUNT(*) c FROM change_log").fetchone()["c"] == 1, \
+        "re-processing must not apply the same change a second time"
+    assert conn3.execute(
+        "SELECT full_text FROM provisions WHERE provision_id = 'DPDPR-R23'"
+    ).fetchone()["full_text"] == "given in such order."
+    conn3.close()
+
+
+# --------------------------------------------------------------------------
 # classify_change.py: max_tokens, and _validate rejecting invented text
 # --------------------------------------------------------------------------
 
@@ -271,14 +472,6 @@ def test_validate_accepts_a_genuine_matching_change():
 # --------------------------------------------------------------------------
 # apply_change.py: span replacement, refusal on 0/2+ matches
 # --------------------------------------------------------------------------
-
-# The URL matters now: apply() refuses a change from a source that is not
-# allowed to make it (audit C-4). The official MeitY Rules PDF is the only
-# source allowed to change a DPDPR-* row, so that is what these tests use.
-RULES_PDF_URL = fs.SOURCES[1]["url"]
-PIB_URL = fs.SOURCES[0]["url"]
-EGAZETTE_HOME_URL = fs.RETIRED_SOURCES[0]["url"]
-
 
 def _fr(document_id="SRC-0099", url=None, source="MeitY"):
     from types import SimpleNamespace

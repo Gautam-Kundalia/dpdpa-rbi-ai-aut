@@ -104,7 +104,13 @@ def test_act_table_passes_verbatim_checks_c1_to_c5(tmp_path):
     48 DPDPA-* rows' `full_text` as committed in db/dpdpa.db, and exits
     non-zero if anything no longer matches verbatim. No database writes.
     """
-    result = _run_act_check(LIVE_DB_PATH, tmp_path)
+    # A COPY, never the tracked file. The script calls init_schema(), which
+    # applies the additive column migrations — harmless, but it would leave
+    # db/dpdpa.db modified in the working tree every time the tests ran, and
+    # that file belongs to the daily bot.
+    db_copy = tmp_path / "committed.db"
+    shutil.copy2(LIVE_DB_PATH, db_copy)
+    result = _run_act_check(db_copy, tmp_path)
     assert result.returncode == 0, (
         f"Act verbatim check failed (exit {result.returncode}):\n"
         f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"

@@ -13,15 +13,34 @@ on:
 permissions:
   contents: write
 
+# Only one of these may run at a time, and a second one WAITS rather than
+# being cancelled (audit finding M-8). Two overlapping runs — a scheduled one
+# and a manual one, say — would both try to commit the database and push, and
+# the loser's push was rejected with nothing to tell you about it. Three merge
+# commits in this repository's history were created to repair exactly that.
+concurrency:
+  group: daily-check
+  cancel-in-progress: false
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      # Every action is pinned to a full commit SHA, not a moving tag (audit
+      # finding M-8). A tag can be repointed at different code by whoever owns
+      # it; a commit SHA cannot. The version in the comment is what that SHA
+      # was when it was looked up, on 30 Sep 2026, with
+      # `git ls-remote --tags https://github.com/actions/<name>`.
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          # Full history, because the commit step below rebases onto whatever
+          # is on main before pushing, and a rebase needs more than one commit
+          # of history to work with.
+          fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: "3.12"
 
@@ -40,15 +59,94 @@ jobs:
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
         run: python src/run_pipeline.py
 
+      # `always()` keeps this running even when the pipeline reported errors —
+      # a source being unreachable must not stop the rest of the day's work
+      # being saved. But the run must have actually REACHED THE END: run_pipeline
+      # deletes var/pipeline_complete when it starts and writes it only once the
+      # database work and any document regeneration have both finished. Without
+      # that file, a run killed half way through used to commit a database that
+      # no longer matched the documents beside it (audit finding M-14).
       - name: Commit and push updated db/docs/data
-        if: always()
+        if: always() && hashFiles('var/pipeline_complete') != ''
         run: |
+          set -euo pipefail
           git config user.name "dpdp-change-monitor[bot]"
           git config user.email "actions@github.com"
           git add db/dpdpa.db docs/*.docx data/*.xlsx
           if git diff --cached --quiet; then
             echo "No tracked changes to commit."
-          else
-            git commit -m "Automated DPDP regulatory change check — $(date -u +%Y-%m-%d)"
-            git push
+            exit 0
           fi
+          git commit -m "Automated DPDP regulatory change check — $(date -u +%Y-%m-%d)"
+          # Somebody may have pushed while this run was working. Rebase onto
+          # them first, then push; if the push still loses a race, try once
+          # more. If it fails after that, FAIL LOUDLY — the step failing is
+          # what triggers the "/fail" heartbeat below, which is how you find
+          # out. Silently giving up here is what left main diverged before
+          # (audit findings M-8 and H-1).
+          for attempt in 1 2; do
+            git pull --rebase --autostash origin main
+            if git push origin HEAD:main; then
+              echo "Pushed on attempt $attempt."
+              exit 0
+            fi
+            echo "Push rejected on attempt $attempt; rebasing and trying again."
+            sleep 5
+          done
+          echo "::error::Could not push after 2 attempts. The database and documents for" \
+               "today are NOT saved. Re-run this workflow once the conflict is resolved."
+          exit 1
+
+      - name: Skipped commit (run did not finish)
+        if: always() && hashFiles('var/pipeline_complete') == ''
+        run: |
+          echo "::warning::var/pipeline_complete is missing, so this run did not reach the" \
+               "end. Nothing was committed on purpose — the database and the documents could" \
+               "be out of step with each other. Tomorrow's run will redo the work."
+
+      # ------------------------------------------------------------------
+      # Heartbeat (audit finding H-1): a "dead man's switch".
+      #
+      # A dead man's switch is an alarm that goes off when an expected signal
+      # DOESN'T arrive. Every warning this project produces travels down one
+      # channel — the daily email over Gmail — and that channel can itself
+      # fail. If the Gmail app password is revoked, or GitHub disables the
+      # schedule, or the job dies before it can send anything, the result is
+      # total silence, and silence looks exactly like "no changes today".
+      #
+      # These two steps ping an outside service that expects to hear from this
+      # job every day. When it stops hearing, IT emails you. Setup is in
+      # README.md under "Heartbeat".
+      # ------------------------------------------------------------------
+      - name: Heartbeat — tell the outside monitor this run succeeded
+        if: success()
+        env:
+          HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
+        run: |
+          if [ -z "${HEARTBEAT_URL:-}" ]; then
+            echo "::warning::HEARTBEAT_URL is not set, so nothing outside this repository" \
+                 "would notice if these daily runs stopped happening. See README.md," \
+                 "section 'Heartbeat', for the five-minute setup."
+            exit 0
+          fi
+          # --retry 3 because a missed ping is a false alarm, and -fsS so a
+          # rejected ping fails this step instead of passing quietly. The URL
+          # is a secret and is never echoed.
+          curl -fsS --retry 3 --max-time 20 "$HEARTBEAT_URL" > /dev/null
+          echo "Heartbeat sent."
+
+      - name: Heartbeat — tell the outside monitor this run failed
+        if: failure()
+        env:
+          HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
+        run: |
+          if [ -z "${HEARTBEAT_URL:-}" ]; then
+            echo "::warning::This run failed and HEARTBEAT_URL is not set, so nothing" \
+                 "outside this repository was told. See README.md, section 'Heartbeat'."
+            exit 0
+          fi
+          # healthchecks.io and compatible services treat "<ping url>/fail" as
+          # "this job ran and went wrong", which alerts immediately rather than
+          # waiting for the next missed ping.
+          curl -fsS --retry 3 --max-time 20 "$HEARTBEAT_URL/fail" > /dev/null || true
+          echo "Failure heartbeat sent."
