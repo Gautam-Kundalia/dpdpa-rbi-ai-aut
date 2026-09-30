@@ -1,0 +1,59 @@
+name: Tests
+
+# Audit finding H-3: until 30 September 2026 nothing ran the test suite
+# automatically. The "permanent guard" over the legal text only ever ran when a
+# human remembered to type `python -m pytest`, even though requirements.txt
+# claimed pdfplumber and pymupdf were "needed for CI to run" it. There was no
+# CI. This file is it.
+#
+# Deliberately added AFTER the two verbatim guards were fixed (audit C-1 and
+# C-2), so what it runs is worth running.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+# Read-only, and no secrets: nothing here needs to write to the repository or
+# call a paid API. Every test uses the mock AI.
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      # Pinned to a full commit SHA, not a moving tag — see the comment in
+      # daily-check.yml. Looked up 30 Sep 2026 with `git ls-remote --tags`.
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run the test suite
+        run: python -m pytest -q
+
+      # The tests must never rewrite the tracked database or documents. They
+      # used to be able to: a test that applied a change made run_pipeline
+      # regenerate docs/*.docx and data/*.xlsx from whatever data the test had
+      # made up. Fixed in src/run_pipeline.py, and this is the belt-and-braces
+      # check that it stays fixed.
+      - name: Check the tests left the committed files alone
+        run: |
+          if ! git diff --quiet -- db/dpdpa.db docs data; then
+            echo "::error::Running the tests changed committed files:"
+            git diff --stat -- db/dpdpa.db docs data
+            exit 1
+          fi
+          echo "db/, docs/ and data/ are untouched, as they must be."

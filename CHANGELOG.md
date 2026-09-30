@@ -784,3 +784,439 @@ actually blocked anything.
 
 $0 — every fix here was plain code (timeouts, wait conditions, blocking a few
 resource types); no AI calls involved in diagnosing or fixing any of it.
+
+## 2026-09-30 (evening) — Independent audit fixes, part 1: the four most serious findings (branch `audit-fixes-2026-09-30`, NOT pushed)
+
+An independent audit of commit `6022d45` (`Claude outputs/AUDIT_REPORT_2026-09-30_opus.md`)
+found four **critical** problems. This entry covers those four. Nothing here has
+been pushed to GitHub and nothing has been merged into `main` — that is Gautam's
+call.
+
+**Jargon, once:** a *guard* is a test whose whole job is to shout if the stored
+legal text stops matching the official PDF. A *negative test* is a test that
+deliberately breaks something and then **requires** the guard to notice — because
+a guard that can never fail is not protecting anything, it is just decoration.
+That turned out to be the theme of this whole session.
+
+### C-1 — the Act's "permanent guard" could not fail
+
+`scripts/rebuild_act_verbatim_2026-09-23.py` was supposed to prove that all 48
+Act sections in the database still match the official PDF word-for-word. It
+didn't. It rebuilt the text *from the PDF*, then checked **that** — and only used
+the database to compare the *list* of section IDs. So it was comparing the PDF
+with itself: guaranteed to pass, no matter how badly the database had drifted.
+Someone could have replaced an entire section with nonsense and this check would
+still have reported all-clear.
+
+Fixed: the checks now read each provision's `full_text` **from the database**.
+The PDF-derived text is still used, but only as the payload for `--apply`.
+Two permanent negative tests were added: replace section 33's text with nonsense,
+and separately flip one word (`significant` to `insignificant`). Both must now
+fail the check.
+
+### C-2 — a word-set fallback that let meaning-reversing edits through
+
+The Rules guard tried an exact match first, then fell back to "are at least 97%
+of this passage's words present *somewhere* in the PDF?" That fallback ignores
+word **order**, and legal text reuses its own vocabulary heavily — so genuinely
+dangerous edits sailed through. Proven, not assumed, by re-running the old check
+against four edits:
+
+| Edit made to the stored law | Old check said |
+|---|---|
+| "shall be" to "may be" (Rule 19) | passed |
+| "six months" to "six years" (Rule 19) | passed, 100% word coverage |
+| "shall not participate in or vote on" to "may participate in and vote on" | passed, 100% word coverage |
+| "shall be" to "may be" inside a 1,650-character Schedule block | passed, 99.7% word coverage |
+
+The middle one is the clearest: a board member's cooling-off obligation reversed
+into a permission, and the check called it verbatim, because every individual
+word still appeared in the PDF somewhere.
+
+Fixed: the word-set fallback is **deleted**. After an exact match fails, the code
+now finds the closest region of the PDF and compares **in order**, requiring a
+similarity of at least 0.995 *and* no word-level differences beyond punctuation.
+All four edits above are now caught.
+
+The 28 genuinely-different passages (out of 545) are handled honestly rather than
+by loosening the check. Each is an entry in `_KNOWN_EXCEPTIONS` recording *the
+exact text the database holds*, *the exact text the PDF holds*, why, and the
+audit finding ID. Two useful consequences: an exception stops applying by itself
+the moment a data-fix script restores the official wording (no test edit needed),
+and it cannot hide a *new* problem in the same place. Both directions are now
+proven by tests — one that changes the excepted phrase itself, and a new set that
+changes something **else** inside a provision that has an exception (including
+another clause of the very same Schedule table row) and requires the guard to
+still fail. That second test matters because seven of the eight provisions
+carrying an exception are Schedules; if "has an exception" had quietly meant "is
+not really checked", those Schedules would have been unguarded while the suite
+still reported green. It did not, but that is now a fact on record rather than an
+assumption.
+
+Also fixed here: the test file no longer writes into tracked files and repairs
+them afterwards (it uses a temp directory), and if the PDF-reading libraries are
+missing it now **skips with a clear reason** instead of failing 32 times with no
+explanation.
+
+### C-3 — the most important document in the project had no baseline
+
+The daily check doesn't send whole documents to the AI. It keeps a copy of each
+page's text from last time (*the baseline*), and sends only the lines that
+differ. Three sources had a baseline. **The DPDP Rules 2025 PDF — SRC-0001, the
+single most important document this project tracks — did not.**
+
+What that would have caused, the first time MeitY published an amended Rules PDF:
+no baseline found, so "this must be the first time I've seen this page", so store
+the amended text as the baseline, so no AI call, and the email reports **"No
+change detected"**. The amendment would then be invisible forever, because from
+the next run on, the amended text *is* the baseline. The tracker would have
+missed the exact event it exists to catch, and the email would have looked
+completely normal.
+
+Fixed in three parts:
+- A baseline is now written at the same moment a source is first recorded, so
+  the gap cannot reappear.
+- The two cases are now told apart. A genuine first sighting stores the baseline
+  **and reports it** as a note in the email. A source that has history but no
+  baseline is a data-integrity fault: it now raises an error naming the repair
+  script, and the existing rollback puts the fingerprint back so tomorrow retries.
+- A new test asserts the invariant directly: after a fetch, every `source_log`
+  row has a matching `source_snapshot` row.
+
+### C-4 — any watched page could rewrite the law
+
+The verbatim checks require new legal text to appear in the fetched content —
+which is exactly the text whoever controls that page controls. The audit proved
+the consequence end-to-end against the real production model: a forged
+"notification" appended to a watched page was accepted and written into
+`provisions.full_text`. The model behaved correctly. The system simply had no way
+to tell a real Gazette notification from text that happens to appear on a Gazette
+web page.
+
+Fixed with an explicit authority table (`may_amend` in `src/fetch_sources.py`):
+
+| Source | May change |
+|---|---|
+| MeitY — DPDP Rules 2025 PDF | `DPDPR-*` only |
+| MeitY — DPDP Act 2023 PDF | `DPDPA-*` only |
+| PIB feed | nothing — alert only |
+| anything else, now or in future | nothing — alert only |
+
+It **fails closed** (an unlisted URL gets nothing) and is enforced **twice** — in
+`classify()` and again in `apply()` — so a mistake in one place cannot undo the
+other. A refused change is reported as an error, never silently dropped.
+
+Two sources changed behaviour as a result:
+- **PIB** is now explicitly a "coincidence detector, not a reliable source". A
+  matching headline no longer triggers an AI call at all; it adds an alert line
+  to the email for a human to follow up.
+- **The eGazette home page is retired.** It reported "changed" on 20 of 23
+  recorded production days and produced a real change on **none** of them — a
+  100% false-positive rate that also spent an AI call every single day. Its real
+  job is now done properly by the document-discovery layer, which only ever
+  raises an alert. Its row is kept for history, marked `watched = 0`.
+
+**TLS:** certificate verification is no longer switched off for any host. The
+eGazette chain is pinned in `certs/egazette-chain.pem`, with fingerprints, how
+they were cross-checked, and the "what to do when it changes" runbook in
+`certs/README.md`.
+
+### The two repair scripts that error messages pointed at
+
+Three places in the code named one-off repair scripts that **did not exist**. The
+worst was C-3's: the next time a real Rules PDF change arrived, production would
+have stopped with an error telling Gautam to run a file that wasn't there — at
+exactly the worst moment. Both are now written, and both were proven on a
+throwaway copy of the database (the real one was never touched):
+
+- `scripts/backfill_source_snapshots_2026-09-30.py` — creates the missing
+  SRC-0001 baseline. It **refuses to guess**: it fetches the document and only
+  stores a baseline if the fingerprint still matches what was last recorded. If
+  the document has already changed, storing today's text would bury that change,
+  so it stops and says what to do instead. Proven both ways on a copy (safe case
+  writes and exits 0; tampered case refuses and exits 1). Needs the internet, so
+  it is run by hand.
+- `scripts/mark_unwatched_sources_2026-09-30.py` — marks the four leftover
+  `source_log` rows `watched = 0`, so the Excel tracker's Source_Log sheet
+  finally matches its own description. Nothing is deleted (those rows carry
+  change history). Proven on a copy, including a second run correctly doing
+  nothing, and all 79 provisions confirmed byte-for-byte unchanged.
+
+Both default to a dry run and take `--db` so they can be rehearsed on a copy.
+**Gautam runs these, not the pipeline.**
+
+### Deliberately NOT done (decisions recorded, not guessed)
+
+- **No approval gate.** Whether auto-apply should wait for a human is Gautam's
+  and EY's decision. Auto-apply stays as it was, apart from the C-4 restrictions.
+- **No `confidence_score` threshold.** The audit measured a genuine, correctly
+  identified amendment at 0.65, so a threshold would block real changes.
+  Confidence is recorded; it does not gate. Now stated in the README.
+- **`DPDPR-SDF-R13` not renamed**, `topic_category` / `sort_order` / the
+  Sub-Rule and Board Order schema values untouched — renaming a primary key would
+  break bookmarks, change history and tests. Recorded as a follow-up.
+- **Court orders and Data Protection Board orders are not watched**, and no code
+  was added to watch them. Now stated plainly in the README's known limitations
+  so nobody assumes otherwise.
+
+### Documentation
+
+`README.md` had several claims that had quietly become untrue and are now
+corrected: the source list was in the wrong trust order with PIB first; eGazette
+was still described as a fetched source; TLS verification was still described as
+switched off; and the "not yet built" list still described the retired home-page
+hash as current. The source-authority rule, the court/Board-order gap, the
+`confidence_score` decision and the stale Excel README sheet are all now written
+down.
+
+### Tests
+
+**76 before this work, 176 after, zero failures.** Every fix above was driven by
+a test that failed first for the right reason.
+
+### Cost
+
+**$0 — no AI calls.** Every test uses the mock classifier; the only network
+traffic was two polite read-only fetches of the MeitY Rules PDF while proving the
+backfill script.
+
+### Full session report
+
+A complete blow-by-blow account of this session — what was already done before it
+started, how each finding was proven rather than assumed, the evidence tables, the
+things deliberately not done, and the order Gautam should run things in — is in
+`docs/audit_fixes_2026-09-30_session_report.md`.
+
+---
+
+## 2026-09-30 — Audit fixes, session 3B: check the unchecked work, then finish it
+
+The previous session ended with a warning attached to commit `4e445cf`: it was
+work in progress from an interrupted session, its tests passed, but **nobody had
+read it line by line against the prompt it was meant to satisfy.** This session
+did that check, fixed what it found, and then finished the two parts Session 3
+never reached — the data-repair scripts and the documentation for the whole
+audit.
+
+**Jargon, defined once:**
+- A **regression** is something that used to work and stopped working because of
+  a change. It is the thing code review exists to catch.
+- A **dry run** is a script that reads everything, works out everything, prints
+  what it *would* do, and writes nothing.
+- A **migration** is a change to the shape of the database — here, always adding
+  a column with a default, never removing or renaming one, so an old copy
+  upgrades in place and no existing row is touched.
+- A **corrigendum** is an official notice correcting a printing mistake in an
+  earlier Gazette notification. It is still an act of government.
+
+### The check found one real break and one test that could not fail
+
+**Regenerating the Excel tracker by hand was broken.** Commit `4e445cf` taught
+`export_excel.py` to read a new `watched` column, but the migration that *adds*
+that column was only ever applied by `run_pipeline.py`. So
+`python src/export_excel.py` on the committed database died with
+`sqlite3.OperationalError: no such column: watched`. Rebuilding the tracker by
+hand is exactly what the hand-over instructions ask Gautam to do, so it would
+have failed on his first attempt, on `main`, with an error that looks alarming
+and explains nothing. `export_excel.main()` now applies the migration first,
+like every other entry point does.
+
+**The test for that column was decoration.** It ran its own
+`SELECT ... WHERE watched = 1` and then checked that answer — so it was checking
+its own query, not the exporter's. Deleting the filter from `export_excel.py`
+left all 176 tests green. It now builds the workbook through the real exporter
+and reads the Source_Log sheet back out of it. A test that cannot fail is not
+protecting anything; that was the audit's headline lesson and it had recurred.
+
+Also added the old-database upgrade test the project's own rules require: a
+copy with no `watched` column gains it, every existing row keeps its values and
+defaults to "still watched", and the tracker rebuilds on it.
+
+**Everything else in `4e445cf` held up.** Each fix was checked by putting the
+old behaviour back in a throwaway copy of the repository and watching the new
+test fail, then pass again: the Excel links (2 tests fail), the amendment
+history (3), the discovery count check (1), the bad Gazette ID (1), the
+catch-up window (2), the `In_Force` formula (1), the document provenance (3),
+the email attachment type (1).
+
+**And the acceptance test the plan asked for was re-derived from scratch**
+rather than taken on trust: the two Word documents and the workbook were
+regenerated from today's committed database twice — once with `main`'s code,
+once with this branch's — and compared. Body text and highlighting are
+**identical**: 4 yellow spans, 3 strike-throughs and 3 captions in the Rules
+document, none in the Act, 3 yellow Change_Log rows, identical
+`Last_Regulatory_Change` cells. The only differences are the three that were
+asked for: the provenance lines, the workbook-relative links, and the
+`IFERROR` in the In_Force formula.
+
+### Two data-repair scripts that did not exist yet
+
+Both are **dry runs by default**, print before-and-after for everything they
+would touch, refuse to write if their own checks fail, and are safe to run
+twice. Both were proven on throwaway copies. **Neither has been run against the
+real database.**
+
+**`scripts/fix_corrigendum_schedules_2026-09-30.py` — the government's own
+corrections, recorded as ours (finding H-5).** Corrigendum G.S.R. 892(E) makes
+eight corrections in six numbered items. Only items (i)–(iii) were recorded as
+government changes. Items (iv) and (v) — the First and Fourth Schedules — were
+folded into two rows marked "we fixed our own data". The consequence: two real
+acts of government were never highlighted in the Word document, never reported
+in any email, and the audit trail credited them to us. This script adds four
+new rows, one per corrected phrase, marked as government changes.
+
+It does **not** rewrite any legal text — the text is already correct — and it
+leaves the two original rows alone as the record of our own restoration work.
+
+**Gautam has not approved these four phrase pairs. The script prints them and
+stays a dry run until he does.**
+
+Two things the work turned up that were not in the plan. `(18 of 2013)` appears
+**three** times in the First Schedule and only one is the corrected one, so the
+context that makes each pair unique is taken from the official PDF — which
+still prints the *uncorrected* wording, and prints it exactly once — rather than
+from the corrected text, which cannot tell the three apart. And item (v)(b) is
+not a phrase swap at all: the original Gazette printed the Fourth Schedule
+Note's items as (a), (a), (b)…(f) — two of them labelled (a) — and the
+corrigendum relabels the whole list (a) to (g).
+
+**`scripts/restore_verbatim_wording_2026-09-30.py` — our own mistakes
+(findings H-7 and M-11).** The Seventh Schedule said "…of a Data Principal
+**for:** (i) performance…" where the Gazette prints "…**for the following
+purposes, namely: —** (i) performance…". Five words of enacted law replaced by
+a colon — the only real paraphrase the audit found in 545 checked pieces of
+text, and a breach of this project's hardest rule. The Fifth and Sixth
+Schedules also dropped the separator dash the Gazette prints after each of
+their 15 numbered headings ("1. Salary. — (1) The Chairperson…").
+
+Both are our errors, not the government's, so both are recorded as data
+corrections and are never highlighted as a change in the law. Nothing is
+hand-typed: the restored phrase and every dash are read out of the official PDF
+at run time, and the script stops if what it finds there is not what it expects.
+
+Afterwards the project's own verbatim guard accepts those three provisions **on
+their own merits** — the reviewed exceptions that had been excusing them stop
+applying, which was the point. Worth recording honestly: 16 of the 18 exceptions
+for those provisions stop applying, and testing showed that the 15 heading
+dashes were never load-bearing for the guard anyway, because it deliberately
+ignores punctuation. Restoring them matters for the faithfulness of the
+documents that reach a reader, not for the guard. Two exceptions remain — the
+Fifth Schedule prints `namely:-` in two places where the database has
+`namely:`. They were outside this session's scope and are named in the README
+as a small follow-up rather than quietly fixed.
+
+### What the data fixes will actually change
+
+All three scripts were run together on a throwaway copy and the documents
+regenerated from it. Compared with today's committed files, **exactly** this
+changed and nothing else:
+
+- the Excel Change_Log gains **4 new yellow rows**;
+- `Last_Regulatory_Change` shows the First and Fourth Schedules for the first
+  time, each with "(+1 earlier)";
+- the Rules Word document gains 3 yellow highlights (First Schedule ×2, Fourth
+  Schedule ×1) and 2 new captions;
+- the Fourth Schedule's item (v)(b) is **captioned but not highlighted** —
+  see below;
+- the Seventh Schedule reads as the Gazette prints it, and the 15 heading
+  dashes are back;
+- Source_Log shows only the 3 sources actually being watched, down from 7;
+- both documents carry their provenance and "not legal advice" lines;
+- the Act document is unchanged apart from its provenance lines.
+
+**One deviation from the plan, stated plainly.** The plan expected all four
+corrigendum items to appear as yellow highlights. Three do. The fourth — item
+(v)(b), the relabelling — changes a run of text that spans several paragraphs,
+and the renderer only ever highlights text it finds whole inside a single
+paragraph. That is deliberate: it is the rule that stops it highlighting the
+wrong words. So that item is named in the provision's caption and is a yellow
+row in the Excel, but has no yellow words in the Word file. The alternative
+would have been to record a smaller, tidier change than the government actually
+made, which would make the highlighting prettier and the legal audit trail
+incomplete.
+
+**And that turned up one more thing worth fixing.** The renderer treated
+"cannot highlight this" as a single case and shouted `WARNING` about all of it.
+That would have meant an alarming line on **every regenerate, forever**, about
+a change that is correctly recorded and will never highlight — and a warning
+nobody can act on is precisely how the one that matters gets missed. (That is
+audit finding M-3, which this same audit fixed for the daily email.) The two
+cases are now told apart, because they are genuinely different:
+
+- the changed words are **still there**, just spread across paragraphs or
+  inside a table — nothing is wrong, so it prints `NOTE:` and is not counted as
+  a warning;
+- the changed words have **gone** from the text — something moved them, which a
+  person should look at, so it still prints `WARNING:` and still counts.
+
+### Documentation — everything reflected everywhere
+
+- **`docs/audit_fixes_2026-09-30.md` is new.** One row for **every** finding the
+  audit raised — all 4 Critical, 7 High, 14 Medium, 9 Low, and the 7 "things
+  that are right" — with the problem in one line, a status, where the fix lives,
+  and which test proves it. Anything not fixed says so and why. Checking it row
+  by row corrected a mistake in its own first draft: **L-6 was already fixed** by
+  an earlier session, not left undone.
+- **`README.md`** — the Source_Log wording, the false "data corrections never
+  affect rendering" claim, the new provenance and relative-link behaviour, and
+  the three new discovery checks. "Known limitations" now also names MeitY's
+  403, MeitY re-publishing at a new address being invisible to address-based
+  watching, amendments by any other ministry being out of scope, the committed
+  Excel's links not working until it is regenerated, the captioned-not-
+  highlighted relabelling, and the two outstanding Fifth Schedule dashes.
+- **The Excel README sheet** is generated by code, so it is corrected here
+  rather than left for later. It no longer implies that nobody has reviewed
+  anything: it now says `Review_Status` does not hold a change back, that all 79
+  provisions and 142 change rows **were** reviewed by hand on 29 Sep 2026, and
+  that anything since is unreviewed until somebody does it. A new paragraph says
+  `Confidence_Score` does not gate, and why a threshold would be harmful.
+- **`CLAUDE.md`** — the note saying PyMuPDF "cannot load locally (blocked DLL)"
+  was steering work away from a tool that works. Checked on this machine before
+  editing: `import pymupdf` and `import fitz` both succeed, PyMuPDF **1.28.2**.
+  It was true once; it is not now. Three standing rules were added.
+- **`docs/session_log_2026-09-30_audit_fixes.md`** records everything done
+  across all of today's sessions, in order, with commit IDs and test counts.
+
+### Deliberately not done
+
+- **The approval gate.** Still Gautam's and EY's decision. The three options, in
+  the audit's own words: **A** — keep auto-apply as it is (the database is always
+  current; the daily email and change log are the audit trail; the risk is that a
+  wrong change reaches the documents before anyone sees it). **B** — a full
+  pending-review queue (every detected change waits for a person to approve it
+  before it touches the database; safest, but if nobody checks it the tracker
+  silently stops updating). **C** — apply automatically but mark the provision
+  "UNCONFIRMED — awaiting review" in the Word and Excel output until a person
+  confirms it (the database stays current, nobody has to clear a queue, and the
+  human check sits exactly where text leaves the system). **The audit
+  recommends C.**
+- **No `confidence_score` threshold** — the audit measured a genuine amendment
+  at 0.65.
+- **`DPDPR-SDF-R13` not renamed**; `topic_category`, `sort_order` and the
+  Sub-Rule / Board Order schema values untouched.
+- **`provisions.latest_change_id` is not moved** by the corrigendum script. The
+  audit suggested repointing it, but that suggestion predates the H-6 fix: the
+  exporters now read the change log directly and no longer depend on that
+  pointer, so moving it would only make "the most recent thing that happened to
+  this provision" untrue.
+
+### Tests
+
+**176 at the start of this session, 198 at the end, zero failures.** The 22 new
+ones cover the Source_Log export path, the old-database upgrade, and the three
+one-off data scripts (dry run changes nothing, `--apply` changes exactly the
+expected rows, running twice is safe).
+
+**Mutation spot-check** — five deliberate corruptions of the stored law, each
+made on a throwaway copy, each required to be caught. All five were: the Act's
+section 33 replaced with nonsense; "significant" turned into "insignificant";
+and in Rule 19 "shall be" → "may be", "six months" → "six years", and a Board
+member's conflict-of-interest ban reversed into a permission. A forged
+amendment from the retired eGazette home page and from PIB is refused, and an
+`apply()` that raises leaves the fingerprint and the baseline untouched so the
+next day sees the change again.
+
+### Cost
+
+**$0 — no AI calls at all.** Every test uses the mock classifier. This session
+made no network requests whatsoever.

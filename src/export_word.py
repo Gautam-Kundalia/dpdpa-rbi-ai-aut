@@ -27,6 +27,8 @@ from __future__ import annotations
 import re
 import sys
 
+from datetime import date
+
 from docx import Document
 from docx.enum.text import WD_COLOR_INDEX
 from docx.oxml import OxmlElement
@@ -36,18 +38,32 @@ from docx.shared import Pt, RGBColor
 from db import PROJECT_ROOT, get_connection
 from word_diff import diff_words
 
+# Audit finding L-8: these documents may be read by, or quoted to, a client, so
+# each one has to carry its own provenance — where the text came from, how
+# current it is, and that it is not legal advice. Before 30 Sep 2026 a reader
+# could not tell from the file itself when it was made or what it was based on.
+DISCLAIMER = (
+    "This is a reading copy generated from the project database. It is not legal "
+    "advice. Verify any clause you quote against the official Gazette."
+)
+
 DOCX_SPECS = [
     {
         "path": "docs/DPDP_Rules_2025.docx",
         "title": "The Digital Personal Data Protection Rules, 2025",
         "subtitle": "Consolidated text, generated from db/dpdpa.db — Source: Gazette Notification "
                      "G.S.R. 846(E), dated 13 November 2025",
+        "provenance": [
+            "Incorporates Corrigendum G.S.R. 892(E) dated 10 December 2025 "
+            "(Gazette Extraordinary No. 806, 11 December 2025).",
+        ],
     },
     {
         "path": "docs/DPDP_Act_2023.docx",
         "title": "The Digital Personal Data Protection Act, 2023",
         "subtitle": "Consolidated text, generated from db/dpdpa.db — Source: Act No. 22 of 2023, "
                      "as notified in phases per G.S.R. 843(E), dated 13 November 2025",
+        "provenance": [],
     },
 ]
 
@@ -211,18 +227,24 @@ def _add_diff_words(paragraph, old_words, new_words):
         paragraph.add_run(" ")
 
 
-def render_block_with_diff(paragraph, block_text, spans, old_words, new_words):
+def render_block_with_diff(paragraph, block_text, spans):
     """
     Render one markdown-lite block into `paragraph` as a single docx
-    paragraph, applying word-diff highlighting at every span in `spans`
-    (a list of (start, end) character offsets within block_text) — a
-    single provision can contain the SAME corrected phrase more than once
-    (e.g. Rule 1(3) and 1(4) both had "of this Gazette" corrected by the
-    same corrigendum item), and every occurrence must be highlighted, not
-    just the first.
+    paragraph, applying word-diff highlighting at every span in `spans`.
+
+    `spans` is a list of (start, end, old_words, new_words) — character
+    offsets within block_text plus the word lists for THAT span's own
+    change. Two things make this list rather than a single span:
+
+    - one corrigendum item can correct the same phrase more than once
+      inside one provision (Rule 1(3) and 1(4) both had "of this Gazette"
+      corrected), so every occurrence must be highlighted, not just the first;
+    - a provision can have been amended MORE THAN ONCE over time, and each
+      amendment highlights its own words (audit finding M-1). Before
+      30 Sep 2026 only the most recent change was ever shown.
     """
     pos = 0
-    for start, end in spans:
+    for start, end, old_words, new_words in spans:
         prefix = block_text[pos:start]
         if prefix:
             add_inline_runs(paragraph, prefix)
@@ -233,79 +255,156 @@ def render_block_with_diff(paragraph, block_text, spans, old_words, new_words):
         add_inline_runs(paragraph, suffix)
 
 
-def add_amendment_caption(doc, amendment):
-    date = (amendment["detected_timestamp"] or "")[:10]
-    p = doc.add_paragraph()
-    run = p.add_run(
-        f"Amended by {amendment['source_document'] or 'official source'} "
-        f"({amendment['change_id']}, {date})"
-    )
-    run.font.size = Pt(8.5)
-    run.font.color.rgb = GREY
-    run.italic = True
-
-
-def render_provision_body(doc, full_text, amendment):
+def add_amendment_caption(doc, amendments):
     """
-    Render a provision's body text. If `amendment` is a real, applied
-    regulatory change (change_origin='regulatory'), highlight only the
-    changed words within full_text and add a caption — at EVERY occurrence
-    of new_full_text, since one corrigendum/amendment item can correct the
-    same phrase more than once within a single provision (e.g. Rule 1(3)
-    and 1(4) both had "of this Gazette" corrected). Returns True if a
-    warning was logged (new_full_text no longer found verbatim in
-    full_text — e.g. a later data correction changed the surrounding
-    text), in which case the text is still rendered, plainly, with the
-    caption still shown.
+    One caption line per amendment, newest first. Several amendments from the
+    same source document on the same day are grouped onto one line, so a
+    corrigendum that corrected four separate phrases reads as one event rather
+    than four (audit finding M-1).
+    """
+    if not isinstance(amendments, (list, tuple)):
+        amendments = [amendments]
+    grouped: list[tuple[str, str, list[str]]] = []
+    for amendment in amendments:
+        source = amendment["source_document"] or "official source"
+        date = (amendment["detected_timestamp"] or "")[:10]
+        if grouped and grouped[-1][0] == source and grouped[-1][1] == date:
+            grouped[-1][2].append(amendment["change_id"])
+        else:
+            grouped.append((source, date, [amendment["change_id"]]))
+
+    for source, date, change_ids in grouped:
+        p = doc.add_paragraph()
+        run = p.add_run(f"Amended by {source} ({', '.join(change_ids)}, {date})")
+        run.font.size = Pt(8.5)
+        run.font.color.rgb = GREY
+        run.italic = True
+
+
+def render_provision_body(doc, full_text, amendments):
+    """
+    Render a provision's body text, highlighting the changed words of EVERY
+    applied regulatory change to it (`change_origin='regulatory'`), newest
+    first, and adding a caption naming each one.
+
+    Two audit findings shaped this:
+
+    - **M-1** — only the most recent change used to be shown, so a provision
+      amended twice lost the first amendment's highlighting entirely.
+    - **H-6** — the amendment to show was found by following
+      `provisions.latest_change_id` and *then* requiring
+      `change_origin='regulatory'`. A data correction applied after a real
+      amendment moved `latest_change_id`, the filter rejected it, and the
+      earlier amendment's highlighting, caption and Excel cell all silently
+      vanished. The README claimed data corrections "never affect rendering";
+      they erased an earlier amendment's rendering. The fix is to ask
+      `change_log` for the newest QUALIFYING changes instead — see
+      fetch_amendments.
+
+    Each change is highlighted at EVERY occurrence of its `new_full_text`,
+    since one corrigendum item can correct the same phrase more than once
+    inside a single provision (Rule 1(3) and 1(4) both had "of this Gazette"
+    corrected).
+
+    Returns True if a warning was logged — a change whose `new_full_text` is
+    no longer in the current text (a later correction moved it, say) is still
+    captioned, just not highlighted. It never mis-highlights.
     """
     full_text = full_text or ""
-    if not amendment or not amendment["new_full_text"]:
+    if amendments is None:
+        amendments = []
+    elif not isinstance(amendments, (list, tuple)):
+        amendments = [amendments]
+    amendments = [a for a in amendments if a["new_full_text"]]
+
+    if not amendments:
         render_markdown_body(doc, full_text)
         return False
 
-    new_full_text = amendment["new_full_text"]
-    if new_full_text not in full_text:
-        render_markdown_body(doc, full_text)
-        add_amendment_caption(doc, amendment)
-        print(
-            f"WARNING: {amendment['change_id']} new_full_text is no longer a "
-            f"substring of the current full_text — rendering plainly with caption only.",
-            file=sys.stderr,
-        )
-        return True
-
     blocks = split_blocks_with_offsets(full_text)
-    # Every block that contains at least one occurrence of new_full_text
-    # (and isn't a table — those aren't rendered via this paragraph path).
-    diff_blocks = {
-        (start, end): _find_all_spans(block, new_full_text)
-        for start, end, block in blocks
-        if new_full_text in block and not is_table_block(block)
-    }
+    # (block offsets) -> list of (span_start, span_end, old_words, new_words)
+    diff_blocks: dict[tuple[int, int], list] = {}
+    warned = False
+    claimed: dict[tuple[int, int], list[tuple[int, int]]] = {}
+
+    for amendment in amendments:
+        new_full_text = amendment["new_full_text"]
+        old_words = re.findall(r"\S+", amendment["old_full_text"] or "")
+        new_words = re.findall(r"\S+", new_full_text)
+        placed = 0
+        for start, end, block in blocks:
+            if is_table_block(block) or new_full_text not in block:
+                continue
+            for span_start, span_end in _find_all_spans(block, new_full_text):
+                # Two amendments can name overlapping text (a later one
+                # rewrote part of what an earlier one changed). Highlighting
+                # both would produce nonsense, so the newer one wins and the
+                # older is captioned only.
+                if any(span_start < c_end and c_start < span_end
+                       for c_start, c_end in claimed.get((start, end), [])):
+                    continue
+                diff_blocks.setdefault((start, end), []).append(
+                    (span_start, span_end, old_words, new_words)
+                )
+                claimed.setdefault((start, end), []).append((span_start, span_end))
+                placed += 1
+        if placed == 0:
+            # Two very different reasons a change cannot be highlighted, and
+            # only one of them is a problem.
+            #
+            # If the changed words are STILL THERE in the provision's text,
+            # nothing is wrong: they just don't sit inside one paragraph, or
+            # they sit inside a table. A government change can legitimately
+            # span several paragraphs — corrigendum G.S.R. 892(E) item (v)(b)
+            # relabels a whole run of the Fourth Schedule Note's items — and
+            # this renderer only ever highlights text it can find whole inside
+            # a single block, deliberately, so it can never highlight the wrong
+            # words. That case is captioned and reported as a NOTE, because
+            # making it a warning would print the same alarming line on every
+            # regenerate forever, and a warning nobody can act on is how the
+            # one that matters gets missed (audit finding M-3).
+            #
+            # If the changed words are GONE from the text, that IS a problem
+            # worth a human's attention: a later correction moved them, or the
+            # recorded change no longer matches reality.
+            still_present = new_full_text in full_text
+            if still_present:
+                print(
+                    f"NOTE: {amendment['change_id']}'s changed text spans more than one "
+                    f"paragraph (or sits inside a table), so it is captioned rather than "
+                    f"highlighted. The text itself is present and correct.",
+                    file=sys.stderr,
+                )
+            else:
+                warned = True
+                print(
+                    f"WARNING: {amendment['change_id']}'s changed text is no longer found "
+                    f"verbatim in the current full_text — captioned but not highlighted. "
+                    f"Something has moved it; worth a look.",
+                    file=sys.stderr,
+                )
+
+    for spans in diff_blocks.values():
+        spans.sort(key=lambda span: span[0])
 
     if not diff_blocks:
         render_markdown_body(doc, full_text)
-        add_amendment_caption(doc, amendment)
-        print(
-            f"WARNING: {amendment['change_id']}'s changed text only appears inside a table "
-            f"or spans multiple paragraphs — rendering plainly with caption only.",
-            file=sys.stderr,
-        )
-        return True
-
-    old_words = re.findall(r"\S+", amendment["old_full_text"] or "")
-    new_words = re.findall(r"\S+", new_full_text)
+        add_amendment_caption(doc, amendments)
+        # `warned`, not a hardcoded True: nothing was highlighted, but that is
+        # only worth flagging when the changed words have actually gone missing
+        # — see the two cases distinguished above.
+        return warned
 
     for start, end, block in blocks:
         spans = diff_blocks.get((start, end))
         if spans:
             p = doc.add_paragraph()
             p.paragraph_format.space_after = Pt(8)
-            render_block_with_diff(p, block, spans, old_words, new_words)
+            render_block_with_diff(p, block, spans)
         else:
             render_markdown_body(doc, block)
-    add_amendment_caption(doc, amendment)
-    return False
+    add_amendment_caption(doc, amendments)
+    return warned
 
 
 # --------------------------------------------------------------------------
@@ -322,27 +421,84 @@ def fetch_provisions(conn, docx_relpath):
     return rows
 
 
+# One query, used by both exporters (export_excel.py imports it), so the Word
+# documents and the Excel tracker can never disagree about what counts as an
+# amendment.
+QUALIFYING_AMENDMENTS_SQL = """
+    SELECT change_id, change_type, old_full_text, new_full_text,
+           source_document, detected_timestamp
+    FROM change_log
+    WHERE provision_id = ?
+      AND applied_to_master = 'Y'
+      AND change_origin = 'regulatory'
+      AND change_type != 'New Provision'
+    ORDER BY detected_timestamp DESC, change_id DESC
+"""
+
+
+def fetch_amendments(conn, provision_id):
+    """
+    Every applied REGULATORY change to this provision, newest first.
+
+    "Regulatory" means the government actually changed the law, as opposed to
+    `change_origin='data_correction'`, which is us fixing our own typo or
+    paraphrase — those stay in the audit trail and are never highlighted.
+    'New Provision' rows are excluded because there is no "before" to show.
+
+    This ASKS FOR the newest qualifying changes. It used to follow
+    `provisions.latest_change_id` and then check whether what it found
+    qualified — so a data correction applied after a real amendment moved that
+    pointer, the check rejected it, and the earlier amendment's highlighting
+    disappeared without a word (audit finding H-6). And because only one row
+    was ever returned, a provision amended twice only ever showed the second
+    amendment (audit finding M-1).
+    """
+    return conn.execute(QUALIFYING_AMENDMENTS_SQL, (provision_id,)).fetchall()
+
+
 def fetch_latest_amendment(conn, provision_id):
+    """Kept for callers that only want the newest one. Prefer
+    fetch_amendments()."""
+    rows = fetch_amendments(conn, provision_id)
+    return rows[0] if rows else None
+
+
+def provenance_lines(conn, spec) -> list[str]:
     """
-    Returns the change that provisions.latest_change_id points at IF it
-    represents a real, applied REGULATORY change — change_origin='regulatory'
-    (the government actually changed the law) and change_type != 'New
-    Provision'. change_origin='data_correction' rows (our own typo/paraphrase
-    fixes) never match here, however recent they are, so they never affect
-    rendering (D1). Keying on latest_change_id — rather than "the newest
-    change_log row of any qualifying type" — is also what lets those
-    corrections stay in the audit trail without disturbing which change (if
-    any) is shown as an amendment.
+    The "where did this come from and how current is it" lines at the top of
+    each document (audit finding L-8).
+
+    "Last regenerated" is deliberately the wording, not "generated on": these
+    files are only rebuilt when a change is actually applied, so on a quiet day
+    the date on the file is older than today and saying "generated on <today>"
+    would be untrue.
     """
-    row = conn.execute(
-        "SELECT c.change_id, c.change_type, c.old_full_text, c.new_full_text, "
-        "c.source_document, c.detected_timestamp "
-        "FROM provisions p JOIN change_log c ON c.change_id = p.latest_change_id "
-        "WHERE p.provision_id = ? AND c.applied_to_master = 'Y' "
+    today = date.today().isoformat()
+    lines = [
+        f"Last regenerated: {today}. This document is generated from the project "
+        f"database — do not hand-edit; re-run src/export_word.py after any change "
+        f"is applied.",
+    ]
+
+    latest = conn.execute(
+        "SELECT MAX(last_updated_date) d FROM provisions WHERE full_text_path = ?",
+        (spec["path"],),
+    ).fetchone()["d"]
+    newest_change = conn.execute(
+        "SELECT MAX(c.detected_timestamp) t FROM change_log c "
+        "JOIN provisions p ON p.provision_id = c.provision_id "
+        "WHERE p.full_text_path = ? AND c.applied_to_master = 'Y' "
         "AND c.change_origin = 'regulatory' AND c.change_type != 'New Provision'",
-        (provision_id,),
-    ).fetchone()
-    return row
+        (spec["path"],),
+    ).fetchone()["t"]
+    if latest:
+        lines.append(f"Text accurate as at: {latest} (the date this database was last updated).")
+    if newest_change:
+        lines.append(
+            f"Most recent government change recorded here: {(newest_change or '')[:10]}."
+        )
+    lines.extend(spec.get("provenance") or [])
+    return lines
 
 
 def build_document(conn, spec):
@@ -360,12 +516,15 @@ def build_document(conn, spec):
     sub.runs[0].font.color.rgb = GREY
     sub.runs[0].italic = True
 
-    note = doc.add_paragraph(
-        "This document is generated from the project database — do not hand-edit; "
-        "re-run src/export_word.py after any change is approved."
-    )
-    note.runs[0].font.size = Pt(9)
-    note.runs[0].font.color.rgb = GREY
+    for line in provenance_lines(conn, spec):
+        note = doc.add_paragraph(line)
+        note.runs[0].font.size = Pt(9)
+        note.runs[0].font.color.rgb = GREY
+
+    disclaimer = doc.add_paragraph(DISCLAIMER)
+    disclaimer.runs[0].font.size = Pt(9)
+    disclaimer.runs[0].font.color.rgb = GREY
+    disclaimer.runs[0].bold = True
 
     doc.add_page_break()
 
@@ -398,8 +557,8 @@ def build_document(conn, spec):
         meta_run.italic = True
         meta.paragraph_format.space_after = Pt(10)
 
-        amendment = fetch_latest_amendment(conn, row["provision_id"])
-        warned = render_provision_body(doc, row["full_text"], amendment)
+        amendments = fetch_amendments(conn, row["provision_id"])
+        warned = render_provision_body(doc, row["full_text"], amendments)
         if warned:
             warnings.append(row["provision_id"])
 

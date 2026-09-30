@@ -27,23 +27,38 @@ def init_schema(conn: sqlite3.Connection, schema_path: Path = SCHEMA_PATH) -> No
     """Create tables if they don't exist yet. Safe to call every run."""
     sql = schema_path.read_text(encoding="utf-8")
     conn.executescript(sql)
-    _migrate_change_origin(conn)
+    _run_migrations(conn)
     conn.commit()
 
 
-def _migrate_change_origin(conn: sqlite3.Connection) -> None:
-    """
-    Idempotent migration: add change_log.change_origin if it doesn't exist yet.
-    SQLite has no 'ADD COLUMN IF NOT EXISTS', so we check PRAGMA table_info first.
-    Safe to call on every startup, including on a brand-new DB where the CREATE
-    TABLE above already included the column.
-    """
-    cols = {row["name"] for row in conn.execute("PRAGMA table_info(change_log)").fetchall()}
-    if "change_origin" not in cols:
-        conn.execute(
-            "ALTER TABLE change_log ADD COLUMN change_origin TEXT "
-            "CHECK (change_origin IN ('baseline','regulatory','data_correction'))"
-        )
+# Every migration this project has ever needed, as (table, column, the rest of
+# the ALTER TABLE statement). All of them are ADDITIVE — a new column with a
+# default — so an old database upgrades in place and no existing row is touched.
+# SQLite has no "ADD COLUMN IF NOT EXISTS", so each one is applied only when
+# PRAGMA table_info says it is missing. Safe to call on every startup, including
+# on a brand-new database where the CREATE TABLE statements already include them.
+MIGRATIONS: list[tuple[str, str, str]] = [
+    # 23 Sep 2026: tells a real government change apart from a fix to our own data.
+    ("change_log", "change_origin",
+     "TEXT CHECK (change_origin IN ('baseline','regulatory','data_correction'))"),
+    # 30 Sep 2026 (audit M-5): is this source still being watched, or is it a
+    # frozen relic kept only for its change history? The Excel Source_Log sheet
+    # claims to show "what is being watched right now", which was untrue.
+    ("source_log", "watched", "INTEGER NOT NULL DEFAULT 1"),
+    # 30 Sep 2026 (audit M-3): how long the SAME fetch problem has been going on,
+    # so a source that has been down for a week stops shouting on the subject
+    # line every single day while still being listed in the email body.
+    ("source_log", "error_signature", "TEXT"),
+    ("source_log", "error_streak_days", "INTEGER NOT NULL DEFAULT 0"),
+    ("source_log", "error_streak_last_date", "TEXT"),
+]
+
+
+def _run_migrations(conn: sqlite3.Connection) -> None:
+    for table, column, ddl in MIGRATIONS:
+        cols = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
 def next_id(conn: sqlite3.Connection, table: str, id_col: str, prefix: str) -> str:

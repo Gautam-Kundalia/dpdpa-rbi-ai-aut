@@ -68,30 +68,57 @@ def _build_body(
     sources_ok: int = 0,
     new_documents: list[dict] | None = None,
     baseline_notes: list[str] | None = None,
+    source_alerts: list[str] | None = None,
+    repeated_errors: list[str] | None = None,
 ) -> tuple[str, str]:
     today = date.today().isoformat()
     reg_changes = _regulatory_changes(applied_changes)
     n = len(reg_changes)
     new_documents = new_documents or []
     baseline_notes = baseline_notes or []
+    # Things a human should look at that are not errors and not applied
+    # changes — today that means a DPDP-shaped PIB press-release title
+    # (PIB is alert-only; see fetch_sources.MAY_AMEND_RULES, audit C-4).
+    source_alerts = source_alerts or []
+    # Errors that are the SAME problem as yesterday (audit finding M-3). They
+    # still appear in full in the body — nothing is hidden — but they do not
+    # count towards the subject line, so a source that has been flaky for a
+    # fortnight stops making every day's email look like a fresh emergency.
+    # A problem is "news" on day 1, and again from day 3 onwards.
+    repeated_errors = repeated_errors or []
+    new_errors = [e for e in errors if e not in repeated_errors]
+    ongoing = len(errors) - len(new_errors)
 
     # A reader skimming only the subject line must not miss a newly
     # discovered document — this was a past silent-failure bug for the
     # error case (see CHANGELOG), so the same "the subject can't lie by
     # omission" rule applies here: this prefix always wins over the
     # ordinary subject wording below, whatever else happened this run.
-    if new_documents:
+    def _extras() -> str:
         extra = []
-        if errors:
-            extra.append(f"{len(errors)} error(s)")
+        if new_errors:
+            extra.append(f"{len(new_errors)} error(s)")
+        elif ongoing:
+            extra.append(f"{ongoing} ongoing problem(s)")
         if n:
             extra.append(f"{n} change{'s' if n != 1 else ''} applied")
-        suffix = f" — also {', '.join(extra)}" if extra else ""
-        subject = f"ACTION NEEDED — new DPDP-related document found ({today}){suffix}"
-    elif errors:
-        subject = f"DPDP Monitor — {len(errors)} error(s) today ({today})" + (
+        return f" — also {', '.join(extra)}" if extra else ""
+
+    if new_documents:
+        subject = f"ACTION NEEDED — new DPDP-related document found ({today}){_extras()}"
+    elif source_alerts:
+        # Same rule as above: the subject line must not say "no changes" on a
+        # day something worth reading happened.
+        subject = f"ALERT — a watched source mentions data protection ({today}){_extras()}"
+    elif new_errors:
+        subject = f"DPDP Monitor — {len(new_errors)} error(s) today ({today})" + (
             f", {n} change{'s' if n != 1 else ''} applied" if n else ""
         )
+    elif ongoing:
+        # Every error today is the same one as yesterday. Say so plainly rather
+        # than either crying wolf or pretending the day was clean.
+        subject = (f"DPDP Monitor — no new problems, {ongoing} ongoing ({today})"
+                   + (f", {n} change{'s' if n != 1 else ''} applied" if n else ""))
     elif n == 0:
         subject = f"DPDP Monitor — No changes detected today ({today})"
     else:
@@ -115,6 +142,15 @@ def _build_body(
             lines.append("")
         lines.append("Nothing has been changed in the database — please review this document.\n")
 
+    if source_alerts:
+        plural = "s" if len(source_alerts) != 1 else ""
+        lines.append(f"{len(source_alerts)} alert{plural} from the watched sources:\n")
+        for alert in source_alerts:
+            lines.append(f"  - {alert}")
+        lines.append("")
+        lines.append("Nothing has been changed in the database for these — they are "
+                      "for information only.\n")
+
     if errors:
         # Must not read "No changes were detected" on an error day — that
         # reads as "everything's fine" when it isn't. Say what was actually
@@ -132,7 +168,12 @@ def _build_body(
             lines.append(f'  - {ref}: "{old_snip}" → "{new_snip}"')
 
     if errors:
-        lines.append(f"\n{len(errors)} error(s) during this run:")
+        heading = f"\n{len(errors)} error(s) during this run"
+        if ongoing and new_errors:
+            heading += f" ({len(new_errors)} new, {ongoing} the same as yesterday)"
+        elif ongoing:
+            heading += " (all of them the same as yesterday)"
+        lines.append(heading + ":")
         for e in errors:
             lines.append(f"  - {e}")
 
@@ -146,7 +187,11 @@ def _build_body(
         lines.append("Updated Word docs and Excel tracker are attached to this email.")
 
     if baseline_notes:
-        lines.append("\nDocument discovery:")
+        # "Baseline" = the first time something was seen, so there is nothing
+        # to compare it against yet. A normal outcome, but it is said out loud
+        # so a first-sighting day is never mistaken for a quiet day
+        # (audit finding C-3).
+        lines.append("\nBaselines captured (first time seen — nothing to compare against yet):")
         for note in baseline_notes:
             lines.append(f"  - {note}")
 
@@ -159,7 +204,12 @@ def _attach_docs(msg: EmailMessage) -> None:
         if not path.exists():
             print(f"[notify] WARNING: expected attachment missing, skipping: {path}")
             continue
-        maintype, subtype = MIME_TYPES[path.suffix]
+        # L-5: an extension nobody thought of must not crash the whole email.
+        # "application/octet-stream" is the standard "some sort of file" type;
+        # every mail client can still save it.
+        maintype, subtype = MIME_TYPES.get(
+            path.suffix.lower(), ("application", "octet-stream")
+        )
         msg.add_attachment(
             path.read_bytes(), maintype=maintype, subtype=subtype, filename=path.name
         )
@@ -172,6 +222,8 @@ def send_summary(
     sources_ok: int = 0,
     new_documents: list[dict] | None = None,
     baseline_notes: list[str] | None = None,
+    source_alerts: list[str] | None = None,
+    repeated_errors: list[str] | None = None,
 ) -> None:
     errors = errors or []
     if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
@@ -180,7 +232,8 @@ def send_summary(
         raise RuntimeError("NOTIFY_EMAIL not set (check .env / GitHub secrets)")
 
     subject, body = _build_body(applied_changes, errors, sources_total, sources_ok,
-                                 new_documents, baseline_notes)
+                                 new_documents, baseline_notes, source_alerts,
+                                 repeated_errors)
 
     msg = EmailMessage()
     msg["Subject"] = subject

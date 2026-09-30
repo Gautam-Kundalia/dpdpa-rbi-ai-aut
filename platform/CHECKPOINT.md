@@ -8,7 +8,29 @@
 - **Current session:** 1 (not started)
 - **Branch for platform work:** `platform-build` (created in Session 1)
 - **Next action:** Start Session 1 — run the prompt in `platform/prompts/SESSION_01.md`.
-- **Last updated:** 2026-09-28 by Claude (Cowork) — files created, no code written yet.
+- **Last updated:** 2026-09-30 by Claude Code — platform work still not started. What
+  happened instead: the independent audit of the existing `src/` pipeline was worked
+  through on branch `audit-fixes-2026-09-30`. **All 4 Critical and all 7 High
+  findings are addressed in code** — 9 fixed outright, 2 (H-5, H-7) waiting on
+  one-off scripts Gautam runs. Two of them are **not yet actually protecting
+  anything**: H-1 (the heartbeat) does nothing until the healthchecks.io check
+  exists and `HEARTBEAT_URL` is set, and H-3 (test CI) needs confirming green on
+  GitHub after the merge. Finding by finding: `docs/audit_fixes_2026-09-30.md`.
+  Narrative:
+  `CHANGELOG.md` and `docs/audit_fixes_2026-09-30_session_report.md`. Order of
+  everything done today: `docs/session_log_2026-09-30_audit_fixes.md`.
+  That branch is **not pushed and not merged** — Gautam decides.
+  Platform Session 1 is still the next thing to start.
+- **Open, and waiting on Gautam:** (1) the approval-gate decision — options A/B/C,
+  the audit recommends C; (2) approving the four corrigendum phrase pairs (H-5) and
+  the Seventh Schedule wording (H-7) before the data scripts are run with `--apply`;
+  (3) revoke the old OpenRouter key, *then* delete its two lines from `.env` (M-9);
+  (4) create the healthchecks.io check and add the `HEARTBEAT_URL` secret (H-1).
+- **Open, technical, nobody has to do soon:** the "apply new documents oldest-first"
+  engine; MeitY's HTTP 403 on its own listing pages; PIB's 20-item, dateless feed;
+  the discovery step's headless browser still using `ignore_https_errors=True`
+  (alert-only, cannot change stored legal text, but it is the last one left);
+  audit L-1, L-2, L-4, L-9; the two remaining Fifth Schedule run-in dashes.
 
 ## Session 1 — Interim approval fix + backend skeleton
 
@@ -122,3 +144,5 @@ _(none yet)_
 | 2026-09-28 | 0 (Cowork) | Created SPEC, CHECKPOINT, CLAUDE.md and session prompts. No code changed. | — | not committed | $0 |
 | 2026-09-29 | manual (Cowork) | Gautam finished reviewing everything. Set all 79 provisions to `Confirmed` and all 142 change-log rows to `Approved` (reviewer: Gautam Kundalia, date 2026-09-29), then rebuilt `data/DPDP_Rules_Tracker.xlsx` from the database. No legal text, summaries or source data changed. Closes decision D5. No code changed. | Not re-run for this change (data-only); the same 32 PDF-extraction tests fail before and after (see CHANGELOG) | commit on `main` | $0 |
 | 2026-09-30 | manual | Detection coverage: new-document discovery (eGazette search, alert-only, never touches provisions/change_log). Built, tested, merged to `main`, then three real GitHub Actions timeouts diagnosed and fixed (see CHANGELOG). Confirmed working in production: a real daily run completed with zero errors and correctly captured its first-ever baseline. MeitY's own document-list pages investigated and confirmed genuinely blocked (not built); PIB investigated as a second discovery source and ruled out (not built). | 76 passed (64 baseline + 12 new), zero new failures, re-confirmed after every fix | commits `76f9fdb`..`fdd8686` on `main` (merged from branch `detection-coverage-fix`) | $0 |
+| 2026-09-30 | manual (audit fixes, part 1) | Fixed the four **critical** findings from the independent audit of `6022d45`. C-1: the Act verbatim guard rebuilt its text from the PDF and then checked that, so it could never fail — it now reads the database. C-2: the Rules guard's fallback only asked whether a passage's words appeared *somewhere* in the PDF, ignoring order, so `shall`→`may` and `six months`→`six years` both passed — replaced with an ordered comparison, and the 28 genuine differences are now exact reviewed pairs that expire by themselves. C-3: the DPDP Rules PDF (SRC-0001, the most important document here) had no baseline, so the first real amendment would have been stored as the baseline and reported as "No change detected" — baselines are now written when a source is first recorded, and a missing one is a loud error. C-4: any watched page could get text written into `provisions.full_text` (the audit proved it with a forged notice) — each source now has an explicit `may_amend` list, enforced in two places, failing closed; PIB is alert-only with no AI call, and the eGazette home page is retired (100% false-positive rate, an AI call a day for nothing). TLS verification is no longer disabled for any host. Also wrote the two one-off repair scripts that error messages already pointed at but which did not exist, and corrected several README claims that had become untrue. **This probably also settles the 32 PDF-extraction test failures noted in the 29 Sep row** — that test file now skips with a clear reason when the PDF-reading libraries are missing, instead of failing without explanation, which is the most likely cause of those 32. Not confirmed: those specific 32 failures were never reproduced, so this is a reasonable expectation rather than a checked fact. | 176 passed (76 baseline + 100 new), zero failures | 7 commits on branch `audit-fixes-2026-09-30` — **not pushed, not merged** (Gautam's call) | $0 |
+| 2026-09-30 | manual (audit fixes, part 2: verify + finish) | Checked commit `4e445cf` line by line against its own session prompt, because the session before this one committed it as work-in-progress and said plainly that nobody had. Two problems found. (1) A real break: `python src/export_excel.py` crashed on the committed database with "no such column: watched" — the new column is added by a migration only `run_pipeline.py` applied, and regenerating the tracker by hand is exactly what the hand-over asks Gautam to do. (2) The test for that column re-typed the exporter's own query and checked that, so deleting the filter from the exporter left all 176 tests green. Both fixed; the old-database upgrade test the project's rules require was added too. Everything else in `4e445cf` held up — each fix proven by putting the old behaviour back in a throwaway worktree and watching the new test fail. The acceptance test was re-derived from scratch: regenerating from today's committed database with `main`'s code and with this branch's gives identical body text and identical highlighting (4 yellow spans, 3 strike-throughs, 3 captions, 3 yellow Change_Log rows); the only differences are the three that were asked for. Then finished what Session 3 never reached: the two data-repair scripts (H-5 corrigendum items recorded as government changes; H-7/M-11 verbatim wording restored), the complete finding-by-finding table for every audit finding, and the README / Excel README sheet / CLAUDE.md corrections. **The four corrigendum phrase pairs and the Seventh Schedule wording still need Gautam's approval before `--apply`.** | 176 -> 198 passing, zero failures; 5-mutation spot-check all caught | 3 commits on `audit-fixes-2026-09-30` (`c3828c6`, `4e42aa0`, `b1e8cf4`) plus this one — **not pushed, not merged** | $0 |

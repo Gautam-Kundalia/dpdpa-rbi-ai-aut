@@ -10,12 +10,15 @@ Usage:
 """
 from __future__ import annotations
 
+import os
+
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
-from db import PROJECT_ROOT, get_connection
+from db import PROJECT_ROOT, get_connection, init_schema
+from export_word import fetch_amendments
 
 FONT_NAME = "Arial"
 HEADER_FILL = PatternFill(start_color="1F3864", end_color="1F3864", fill_type="solid")
@@ -85,6 +88,30 @@ def set_widths(ws, widths):
         ws.column_dimensions[get_column_letter(i)].width = w
 
 
+def _workbook_relative(repo_relative_path: str) -> str:
+    """
+    Turn a repository-relative path like "docs/DPDP_Act_2023.docx" into a link
+    that works for whoever opens the workbook: one relative to the WORKBOOK'S
+    OWN FOLDER, e.g. "../docs/DPDP_Act_2023.docx".
+
+    Audit finding H-4. This used to be `str(PROJECT_ROOT / val)` — an absolute
+    path on whichever machine happened to generate the file. Every one of the
+    79 "Open full text" links in the committed workbook pointed at
+    "/tmp/claude-0/.../repo/docs/DPDP_Act_2023.docx", a folder inside a past
+    AI session's sandbox that has never existed on anyone's computer.
+    Regenerating on a Windows PC produced a "C:/Users/..." path, and on GitHub's
+    runners it would produce "/home/runner/work/...". None of them exist for the
+    person reading the file.
+
+    Excel resolves a relative hyperlink against the workbook's own folder, and
+    accepts forward slashes on Windows as well as elsewhere, so one form works
+    everywhere.
+    """
+    workbook_dir = OUT_PATH.parent
+    target = os.path.relpath(PROJECT_ROOT / repo_relative_path, workbook_dir)
+    return target.replace(os.sep, "/")
+
+
 def write_rows(ws, cols, rows, start_row=2, full_text_col=None, anchor_col=None):
     r = start_row - 1
     for r, row in enumerate(rows, start=start_row):
@@ -95,7 +122,7 @@ def write_rows(ws, cols, rows, start_row=2, full_text_col=None, anchor_col=None)
             cell.alignment = Alignment(wrap_text=True, vertical="top")
             if full_text_col and col == full_text_col and val:
                 anchor = row[anchor_col] if anchor_col and anchor_col in row.keys() else None
-                target = str(PROJECT_ROOT / val)
+                target = _workbook_relative(val)
                 if anchor:
                     target = f"{target}#{anchor}"
                 cell.hyperlink = target
@@ -139,7 +166,13 @@ def add_in_force_column(ws, last_data_row):
 
     for r in range(2, last_data_row + 1):
         eff_cell = f"{EFFECTIVE_DATE_COL_LETTER}{r}"
-        formula = f'=IF({eff_cell}="","",IF(TODAY()>=DATEVALUE({eff_cell}),"Yes","No"))'
+        # IFERROR because DATEVALUE returns #VALUE! for anything it cannot read
+        # as a date — an empty-looking cell holding a space, or a date in a
+        # format the reader's Excel locale does not recognise (audit finding
+        # L-3). A #VALUE! in this column looked like a broken workbook; now an
+        # unreadable date simply reads as blank.
+        formula = (f'=IF({eff_cell}="","",IFERROR('
+                   f'IF(TODAY()>=DATEVALUE({eff_cell}),"Yes","No"),""))')
         cell = ws.cell(row=r, column=IN_FORCE_COL_IDX, value=formula)
         cell.border = BORDER
         cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -147,18 +180,29 @@ def add_in_force_column(ws, last_data_row):
 
 def fetch_last_regulatory_changes(conn):
     """
-    provision_id -> (change_id, date) for provisions whose latest_change_id
-    points at an applied, change_origin='regulatory', non-'New Provision'
-    change — same rule export_word.py uses to decide what's shown as amended
-    in the Word document, so this column always agrees with it.
+    provision_id -> (newest change_id, its date, how many earlier ones there
+    are) for every provision that has had a real government change applied.
+
+    Uses export_word.fetch_amendments, so this column can never disagree with
+    what the Word document highlights. It used to run its own query that
+    followed `provisions.latest_change_id` and then required
+    change_origin='regulatory' — so a data correction applied after a real
+    amendment moved that pointer, the filter rejected it, and this cell went
+    blank while `change_log` still held the amendment (audit finding H-6).
+    The count of earlier ones is audit finding M-1: a provision amended twice
+    used to look as though it had been amended once.
     """
-    rows = conn.execute(
-        "SELECT p.provision_id, c.change_id, c.detected_timestamp "
-        "FROM provisions p JOIN change_log c ON c.change_id = p.latest_change_id "
-        "WHERE c.applied_to_master = 'Y' AND c.change_origin = 'regulatory' "
-        "AND c.change_type != 'New Provision'"
-    ).fetchall()
-    return {r["provision_id"]: (r["change_id"], (r["detected_timestamp"] or "")[:10]) for r in rows}
+    result = {}
+    for row in conn.execute("SELECT provision_id FROM provisions").fetchall():
+        amendments = fetch_amendments(conn, row["provision_id"])
+        if amendments:
+            newest = amendments[0]
+            result[row["provision_id"]] = (
+                newest["change_id"],
+                (newest["detected_timestamp"] or "")[:10],
+                len(amendments) - 1,
+            )
+    return result
 
 
 def add_last_regulatory_change_column(ws, provisions, last_reg_changes):
@@ -175,17 +219,39 @@ def add_last_regulatory_change_column(ws, provisions, last_reg_changes):
         cell.border = BORDER
         cell.alignment = Alignment(horizontal="center", vertical="center")
         if entry:
-            change_id, date = entry
+            change_id, date, earlier = entry
             cell.value = f"{date} ({change_id})"
+            if earlier:
+                # Audit finding M-1: say so when there is more history than the
+                # one change named here, instead of implying there is only one.
+                cell.value += f" (+{earlier} earlier)"
             cell.fill = REGULATORY_FILL
 
 
 def main():
     conn = get_connection()
+    # Bring an older database up to date before reading it. This exporter is
+    # run by hand as well as by run_pipeline.py, and by hand it is usually the
+    # FIRST thing run after a code update — so it can be the first code to meet
+    # a database that predates a column it needs. Without this, regenerating
+    # the tracker on a freshly pulled repository died with
+    # "sqlite3.OperationalError: no such column: watched", because the watched
+    # column (audit finding M-5) is added by a migration that only
+    # run_pipeline.py used to apply. init_schema is additive and safe to call
+    # every time: it adds nothing that is already there and changes no row.
+    init_schema(conn)
 
     provisions = conn.execute(f"SELECT {','.join(MP_COLS)} FROM provisions ORDER BY sort_order").fetchall()
     changes = conn.execute(f"SELECT {','.join(CL_COLS)} FROM change_log ORDER BY detected_timestamp").fetchall()
-    sources = conn.execute(f"SELECT {','.join(SL_COLS)} FROM source_log ORDER BY fetched_date").fetchall()
+    # Only sources still being watched (audit finding M-5). This sheet says it
+    # shows "what is being watched right now", and it held 7 rows for 4 watched
+    # URLs — three of them frozen relics from one-off fetches. The rows are not
+    # deleted (they carry linked_change_ids history); they are filtered out here
+    # and their watched flag is set to 0 by
+    # scripts/mark_unwatched_sources_2026-09-30.py.
+    sources = conn.execute(
+        f"SELECT {','.join(SL_COLS)} FROM source_log WHERE watched = 1 ORDER BY fetched_date"
+    ).fetchall()
     last_reg_changes = fetch_last_regulatory_changes(conn)
     conn.close()
 
@@ -300,18 +366,23 @@ def build_readme(wb):
              "'current state' view a consultant reads. Full_Text_Path is a clickable link "
              "that opens the full clause text in the consolidated Word document "
              "(DPDP_Rules_2025.docx or DPDP_Act_2023.docx), jumping straight to that "
-             "provision's bookmark.")
+             "provision's bookmark. The link is relative to this workbook's own folder "
+             "(../docs/...), so it works as long as the docs folder travels with the file. "
+             "If you email this workbook on its own, the links will not resolve — attach "
+             "the two Word documents too.")
     r = para(r, "Change_Log",
              "Append-only. One row per detected change, whether it was a real government "
              "change or one of our own internal data corrections (see Change_Origin below) — "
              "never edit or delete past rows, that history is the audit trail. Provision_ID "
              "links a change back to its row in Master_Provisions.")
     r = para(r, "Source_Log",
-             "One row per source address (URL) the pipeline watches (a MeitY page, a Gazette "
-             "notification, a PIB listing) — not one row per fetch. Each row is overwritten "
-             "every run with the latest fetch's date and content fingerprint, so this sheet "
-             "shows what's being watched right now and when it was last checked, not a "
-             "history of past runs. Past detected changes live in Change_Log instead.")
+             "One row per source address (URL) the pipeline is watching RIGHT NOW — not one "
+             "row per fetch, and not a history. Each row is overwritten every run with the "
+             "latest fetch's date and content fingerprint. Addresses that were fetched once "
+             "and are no longer watched (a one-off Gazette PDF, a retired page) are kept in "
+             "the database for their change history but are deliberately left out of this "
+             "sheet, because it would otherwise claim to be watching things it isn't. "
+             "Past detected changes live in Change_Log instead.")
     r += 1
 
     r = section(r, "Status vs. In_Force — these answer different questions")
@@ -344,10 +415,14 @@ def build_readme(wb):
              "changed — not the whole provision. In the Word documents: the changed words are "
              "highlighted yellow, with any removed words shown struck through in grey "
              "immediately before their replacement, plus a small caption naming the source and "
-             "change. In this Change_Log sheet, an entire row is filled light yellow when it's "
-             "a regulatory change. Our own data corrections are never highlighted anywhere — "
-             "they stay in Change_Log as a record, but the current, correct text is simply "
-             "shown as-is, with nothing marked up.")
+             "change. EVERY government change to a provision is shown, not just the most "
+             "recent one, and each gets its own caption line. In this Change_Log sheet, an "
+             "entire row is filled light yellow when it's a regulatory change. Our own data "
+             "corrections are never highlighted anywhere — they stay in Change_Log as a "
+             "record, but the current, correct text is simply shown as-is, with nothing "
+             "marked up. A data correction also cannot hide an earlier government change: "
+             "the highlighting is worked out from Change_Log itself, not from whichever "
+             "change happens to be the most recent one of any kind.")
     r += 1
 
     r = section(r, "Color legend")
@@ -376,7 +451,10 @@ def build_readme(wb):
     c3.fill = REGULATORY_FILL
     readme.cell(row=r, column=2,
                 value="Light yellow marks a real government change: the whole row in Change_Log, "
-                      "or just the Last_Regulatory_Change cell in Master_Provisions.")
+                      "or just the Last_Regulatory_Change cell in Master_Provisions. That cell "
+                      "names the most recent one and, if there have been others, says how many "
+                      "earlier ones there are — e.g. '2025-12-11 (CHG-0092) (+1 earlier)'. The "
+                      "full list is in Change_Log.")
     readme.cell(row=r, column=2).font = Font(name=FONT_NAME, size=10)
     readme.cell(row=r, column=2).alignment = Alignment(wrap_text=True)
     r += 2
@@ -384,13 +462,30 @@ def build_readme(wb):
     r = section(r, "How a change actually gets applied")
     r = para(r, "No human review gate",
              "This pipeline runs fully automatically, every day, with no human approval step "
-             "before a detected change is written to Master_Provisions. Review_Status on a "
-             "Change_Log row records how confident the automated classification was — it is "
-             "not a queue waiting for a consultant's sign-off. If you want a human check before "
-             "a change goes live, that would need to be added as a deliberate change to the "
-             "pipeline; right now, it isn't there.")
+             "before a detected change is written to Master_Provisions. Review_Status is NOT a "
+             "queue that holds a change back — a change is applied whether or not anyone has "
+             "looked at it. It is a record of whether a person has since checked that row. "
+             "Everything in this workbook as at 29 September 2026 HAS been reviewed by hand: "
+             "all 79 provisions were set to Confirmed and all 142 change rows to Approved by "
+             "Gautam Kundalia on that date. Anything added after that is applied automatically "
+             "and is not reviewed until somebody does it. If you want a human check before a "
+             "change goes live, that has to be built; right now it isn't there, and whether to "
+             "build it is an open decision.")
+    r = para(r, "What Confidence_Score is not",
+             "Every AI-classified change records the model's own confidence, and a low score "
+             "does NOT stop the change being applied. That is deliberate: an independent audit "
+             "measured a genuine, correctly-identified amendment at 0.65, so a cut-off would "
+             "have blocked a real change in the law. Treat the number as a hint while "
+             "reviewing, never as a safety net.")
     r = para(r, "1. Detect", "The pipeline checks each Source_Log-tracked address on schedule; a changed fingerprint updates that row.")
     r = para(r, "2. Extract & classify", "Only the changed passages of the source are compared against the current text and sent to Claude, which reports what changed and how (Change_Type, Change_Origin, Old/New text).")
+    r = para(r, "2a. Check the source is allowed to say that",
+             "Only the official MeitY PDF of an instrument may change that instrument's text: "
+             "the DPDP Rules PDF may change Rule and Schedule rows, the DPDP Act PDF may change "
+             "Act Section rows, and nothing else may change anything. A press release or a "
+             "Gazette index page can raise an alert for a human to read, never a change to the "
+             "text. Anything refused is reported as an error in the daily email — it is never "
+             "dropped quietly.")
     r = para(r, "3. Apply, automatically", "Master_Provisions is updated immediately, Change_Log's Applied_To_Master is marked Y, and the next export_word.py / export_excel.py run renders the result — a highlighted amendment if Change_Origin is 'regulatory', nothing visible if it's a 'data_correction'.")
 
     for row in readme.iter_rows(min_row=1, max_row=r, min_col=1, max_col=2):

@@ -31,6 +31,7 @@ import anthropic
 from dotenv import load_dotenv
 
 from db import PROJECT_ROOT
+from fetch_sources import authority_refusal, is_authorised
 
 load_dotenv(PROJECT_ROOT / ".env")
 
@@ -46,6 +47,27 @@ VALID_CHANGE_TYPES = {"New Provision", "Amendment", "Repeal", "Clarification", "
 # API/network failures even on Claude's enforced-schema tool-use path,
 # where a malformed response is no longer expected.
 MAX_CLASSIFY_ATTEMPTS = 3
+
+# Only these are worth trying again (audit finding M-2). Everything else is a
+# decision, not an accident: if the model's reply fails the verbatim checks, or
+# names a provision that does not exist, asking the same question again will get
+# the same answer — it just costs three times as much. Before 30 Sep 2026 every
+# failure was retried twice over, so a deterministic rejection was paid for
+# three times.
+RETRYABLE_API_ERRORS = tuple(
+    cls for cls in (
+        getattr(anthropic, name, None) for name in (
+            "APIConnectionError",      # could not reach the API at all
+            "APITimeoutError",         # reached it, no answer in time
+            "RateLimitError",          # asked to slow down
+            "InternalServerError",     # the API broke (HTTP 5xx)
+            "OverloadedError",         # the API is busy
+            "ServiceUnavailableError",
+            "DeadlineExceededError",
+            "RetryableError",
+        )
+    ) if isinstance(cls, type) and issubclass(cls, BaseException)
+)
 
 MAX_PROMPT_CHARS = 20_000
 DEVANAGARI_RE = re.compile(r"[ऀ-ॿ]")
@@ -275,6 +297,23 @@ def _pib_relevant_hunks(hunks: list[Hunk]) -> list[Hunk]:
     return kept
 
 
+def _pib_alert_titles(hunks: list[Hunk]) -> list[str]:
+    """
+    The DPDP-relevant press-release titles in these hunks. PIB content is one
+    title per line, so an added line that matches the keyword filter IS the
+    title. Used to raise an alert instead of calling the model — see
+    classify() and MAY_AMEND in fetch_sources.py.
+    """
+    titles = []
+    for hunk in hunks:
+        for line in hunk.lines:
+            if line.startswith("+") and PIB_RELEVANCE_RE.search(line):
+                title = line[1:].strip()
+                if title and title not in titles:
+                    titles.append(title)
+    return titles
+
+
 def _render_diff(hunks: list[Hunk], max_chars: int = MAX_PROMPT_CHARS) -> str:
     text = "\n\n".join(h.render() for h in hunks)
     if len(text) <= max_chars:
@@ -429,7 +468,13 @@ def _validate(parsed: dict, provisions: list[dict], fetch_result) -> list[dict]:
     return validated
 
 
-def classify(fetch_result, conn) -> list[dict]:
+def classify(
+    fetch_result,
+    conn,
+    baseline_notes: list[str] | None = None,
+    alerts: list[str] | None = None,
+    errors: list[str] | None = None,
+) -> list[dict]:
     """
     Classify one changed source using the diff-first design: compare
     against the last successfully-classified snapshot (source_snapshot),
@@ -438,19 +483,51 @@ def classify(fetch_result, conn) -> list[dict]:
     provision's current text and the fetched content before trusting it.
 
     Returns a validated list of change dicts — an empty list is a
-    legitimate success (no prior snapshot yet = "baseline captured", or a
-    real diff that the model correctly found nothing government-caused
-    in, or a PIB fetch with no DPDP-relevant new titles). On a genuine
-    failure, retries up to MAX_CLASSIFY_ATTEMPTS times; if it still fails,
-    marks source_log.processing_status='Error' and raises
+    legitimate success (the very first check of a source = "baseline
+    captured", or a real diff that the model correctly found nothing
+    government-caused in, or a PIB fetch with no DPDP-relevant new titles).
+    On a genuine failure, retries up to MAX_CLASSIFY_ATTEMPTS times; if it
+    still fails, marks source_log.processing_status='Error' and raises
     ClassificationFailed (never returns [] for a failure — that would be
     indistinguishable from a genuine "no change" result).
+
+    The three optional lists are how this function talks back to the daily
+    email, rather than printing into a log nobody reads:
+      baseline_notes — "first time we saw this source" notes (not errors);
+      alerts         — things a human should go and look at;
+      errors         — refusals and failures, which also set the exit code.
     """
     snapshot = _get_snapshot(conn, fetch_result.document_id)
     if snapshot is None:
-        _store_snapshot(conn, fetch_result)
-        print(f"[classify_change] {fetch_result.document_id}: no prior snapshot — baseline captured, no AI call.")
-        return []
+        # Two very different situations, which used to be treated the same way
+        # (audit finding C-3).
+        if fetch_result.prior_hash is None:
+            # (i) Genuinely the first time this source has been seen: there is
+            # nothing to diff against, so today's text becomes the baseline.
+            # That is a normal outcome, not an error — but it is REPORTED, so
+            # the run never silently says "no change" on a day it actually
+            # learnt something for the first time.
+            _store_snapshot(conn, fetch_result)
+            note = (
+                f"first check of {fetch_result.source} ({fetch_result.document_id}) — "
+                f"today's text stored as the baseline; changes will be reported from the next run"
+            )
+            print(f"[classify_change] {fetch_result.document_id}: no prior snapshot — baseline captured, no AI call.")
+            if baseline_notes is not None:
+                baseline_notes.append(note)
+            return []
+        # (ii) This source HAS been fetched before (source_log holds a prior
+        # fingerprint) but has no baseline text. That is a data-integrity
+        # problem, not a first sighting: silently storing today's text would
+        # swallow the very change that triggered this run. Raise instead, so
+        # run_pipeline rolls the fingerprint back and the source is retried
+        # tomorrow rather than written off.
+        raise ClassificationFailed(
+            f"no baseline for {fetch_result.document_id} ({fetch_result.source} — "
+            f"{fetch_result.url}) although it has history (prior fingerprint on record). "
+            f"Refusing to store today's text as the baseline — that would hide this change. "
+            f"Run scripts/backfill_source_snapshots_2026-09-30.py to create the missing baseline."
+        )
 
     if snapshot["content_hash"] == fetch_result.content_hash:
         # fetch_all() only returns sources whose hash changed, so this
@@ -470,6 +547,22 @@ def classify(fetch_result, conn) -> list[dict]:
             _store_snapshot(conn, fetch_result)
             print(f"[classify_change] {fetch_result.document_id}: no DPDP-relevant PIB titles — No Change Detected, no AI call.")
             return []
+        # PIB is ALERT-ONLY (audit findings C-4 and M-4). A press release is
+        # not a legal instrument: it can tell you something DPDP-shaped
+        # happened, never what the law now says. So a matching title raises an
+        # alert for a human and stops there — no AI call, nothing applied.
+        for title in _pib_alert_titles(hunks):
+            note = f"PIB mentions data protection: {title} — go and look"
+            print(f"[classify_change] {fetch_result.document_id}: {note}")
+            if alerts is not None:
+                alerts.append(note)
+        conn.execute(
+            "UPDATE source_log SET processing_status = 'Processed' WHERE document_id = ?",
+            (fetch_result.document_id,),
+        )
+        conn.commit()
+        _store_snapshot(conn, fetch_result)
+        return []
 
     hunks, hindi_dropped = _drop_hindi_hunks(hunks)
     if hindi_dropped:
@@ -492,17 +585,41 @@ def classify(fetch_result, conn) -> list[dict]:
 
     last_error = None
     last_raw = None
+    attempts_used = 0
     for attempt in range(MAX_CLASSIFY_ATTEMPTS):
+        attempts_used = attempt + 1
         parsed = None
         try:
             parsed = _call_claude(user_prompt)
             validated = _validate(parsed, provisions, fetch_result)
+            # Source-authority rule (audit finding C-4), enforced here AND
+            # again in apply_change.apply(). A refused change is reported as an
+            # error so it reaches the exit code and the email — it must never
+            # just disappear.
+            allowed = []
+            for change in validated:
+                if is_authorised(fetch_result.url, change.get("provision_id", "")):
+                    allowed.append(change)
+                    continue
+                refusal = authority_refusal(
+                    fetch_result.url, fetch_result.source, change.get("provision_id", "")
+                )
+                print(f"[classify_change] {refusal}")
+                if errors is not None:
+                    errors.append(refusal)
             _store_snapshot(conn, fetch_result)
-            return validated
+            return allowed
         except Exception as exc:
             last_error = exc
             last_raw = parsed
             print(f"[classify_change] attempt {attempt + 1} failed for {fetch_result.document_id}: {exc}")
+            if not isinstance(exc, RETRYABLE_API_ERRORS):
+                # A deterministic failure (audit M-2): the reply was
+                # well-formed but wrong, or the request itself is impossible.
+                # Retrying buys nothing and costs another call.
+                print(f"[classify_change] not retrying — {type(exc).__name__} is a decision, "
+                      f"not a transient failure.")
+                break
 
     conn.execute(
         "UPDATE source_log SET processing_status = 'Error' WHERE document_id = ?",
@@ -513,8 +630,8 @@ def classify(fetch_result, conn) -> list[dict]:
     # str() it before slicing so a shape/validation failure (_validate raised
     # after a successful, well-formed tool call) still shows what came back.
     raw_snippet = f" — raw model output: {str(last_raw)[:300]!r}" if last_raw else ""
-    print(f"[classify_change] giving up on {fetch_result.document_id} after {MAX_CLASSIFY_ATTEMPTS} attempts: {last_error}{raw_snippet}")
+    print(f"[classify_change] giving up on {fetch_result.document_id} after {attempts_used} attempt(s): {last_error}{raw_snippet}")
     raise ClassificationFailed(
         f"could not get a valid classification for {fetch_result.document_id} "
-        f"({fetch_result.source} — {fetch_result.url}) after {MAX_CLASSIFY_ATTEMPTS} attempts: {last_error!r}{raw_snippet}"
+        f"({fetch_result.source} — {fetch_result.url}) after {attempts_used} attempt(s): {last_error!r}{raw_snippet}"
     ) from last_error

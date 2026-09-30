@@ -5,3 +5,7 @@ __pycache__/
 data/~$*.xlsx
 Claude outputs/
 db/backup/
+# Scratch space for things that must never be committed: the daily run's
+# completion marker (see src/run_pipeline.py) and any working copies of the
+# database made by the one-off scripts.
+var/
