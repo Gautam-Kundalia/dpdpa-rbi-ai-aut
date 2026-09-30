@@ -46,6 +46,25 @@ and in the checkpoint's session log.
 - **AI spend:** tests always use the mock LLM. Real AI calls only when a session
   file explicitly allows it, within the stated dollar cap, and the cost goes in
   the checkpoint's session log.
+- **A data correction must never change what the documents show as a change in
+  the law.** `change_origin='regulatory'` means the government did something;
+  `change_origin='data_correction'` means we fixed our own typing. Only the
+  first is ever highlighted or reported. Fixing our own mistake must not add,
+  remove or move a single highlight. (This was audit finding H-6: a correction
+  applied after a real amendment silently erased that amendment's highlighting.)
+- **A "regulatory" record is anything the government did, however we found it.**
+  It does not matter whether the pipeline detected it or a person typed it in
+  from a Gazette PDF by hand. If the government changed the law, the row is
+  `regulatory`. (Audit finding H-5: two items of a government corrigendum were
+  filed as our own data correction because a human had applied them.)
+- **Every one-off data script is a dry run by default.** No `--apply`, no
+  writes. It must print before-and-after for everything it would touch, refuse
+  to write if its own checks fail, be safe to run twice, and take `--db` so it
+  can be rehearsed on a copy. Prove it on a copy; never run it on `db/dpdpa.db`.
+- **A test that cannot fail is not a test.** Before trusting one, put the old
+  behaviour back and watch it go red. A test that re-implements the code's own
+  query and then checks that answer is checking itself. (This is what let audit
+  findings C-1 and M-5 survive a green test suite.)
 - **Things only Gautam does:** pushing to `main`, merging, adding/changing GitHub
   secrets, deploying to any server, sending anything to a real client, publishing
   obligations for real use (needs EY legal sign-off). Prepare these; don't do them.
