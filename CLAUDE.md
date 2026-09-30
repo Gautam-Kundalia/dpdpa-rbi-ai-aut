@@ -55,8 +55,12 @@ and in the checkpoint's session log.
 - A virtual environment exists at `.venv/` — activate it (`.venv\Scripts\activate`)
   or call `.venv\Scripts\python` so installs don't go into the system Python.
 - Windows Device Guard blocks `pip.exe` directly — always use `python -m pip`.
-- PyMuPDF (`fitz`) cannot load locally (blocked DLL). Use `pypdf` / `pdfplumber`
-  for anything that must run locally. PyMuPDF works on GitHub's Ubuntu runners.
+- PyMuPDF **does** work on this PC. It is installed as version 1.28.2, and both
+  `import pymupdf` and `import fitz` succeed (`fitz` prints a deprecation
+  warning — use `import pymupdf`). An earlier note here said it could not load
+  because of a blocked DLL; that was true once and is no longer. Checked again
+  on 30 Sep 2026 (audit finding L-7). `pypdf` and `pdfplumber` are installed
+  too, and the verbatim guard deliberately uses two independent extractors.
 - No `gh` CLI and no GitHub token on this PC — you cannot open PRs or read
   secrets. Write a PR description file instead when a session asks for one.
 - The Next.js work needs Node.js 20+ (`node -v`). If it is missing, stop and tell

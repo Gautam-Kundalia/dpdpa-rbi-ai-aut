@@ -462,11 +462,21 @@ def build_readme(wb):
     r = section(r, "How a change actually gets applied")
     r = para(r, "No human review gate",
              "This pipeline runs fully automatically, every day, with no human approval step "
-             "before a detected change is written to Master_Provisions. Review_Status on a "
-             "Change_Log row records how confident the automated classification was — it is "
-             "not a queue waiting for a consultant's sign-off. If you want a human check before "
-             "a change goes live, that would need to be added as a deliberate change to the "
-             "pipeline; right now, it isn't there.")
+             "before a detected change is written to Master_Provisions. Review_Status is NOT a "
+             "queue that holds a change back — a change is applied whether or not anyone has "
+             "looked at it. It is a record of whether a person has since checked that row. "
+             "Everything in this workbook as at 29 September 2026 HAS been reviewed by hand: "
+             "all 79 provisions were set to Confirmed and all 142 change rows to Approved by "
+             "Gautam Kundalia on that date. Anything added after that is applied automatically "
+             "and is not reviewed until somebody does it. If you want a human check before a "
+             "change goes live, that has to be built; right now it isn't there, and whether to "
+             "build it is an open decision.")
+    r = para(r, "What Confidence_Score is not",
+             "Every AI-classified change records the model's own confidence, and a low score "
+             "does NOT stop the change being applied. That is deliberate: an independent audit "
+             "measured a genuine, correctly-identified amendment at 0.65, so a cut-off would "
+             "have blocked a real change in the law. Treat the number as a hint while "
+             "reviewing, never as a safety net.")
     r = para(r, "1. Detect", "The pipeline checks each Source_Log-tracked address on schedule; a changed fingerprint updates that row.")
     r = para(r, "2. Extract & classify", "Only the changed passages of the source are compared against the current text and sent to Claude, which reports what changed and how (Change_Type, Change_Origin, Old/New text).")
     r = para(r, "2a. Check the source is allowed to say that",

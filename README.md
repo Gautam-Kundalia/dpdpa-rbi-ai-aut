@@ -42,8 +42,9 @@ PIB (RSS, alert-only) --/   src/fetch_sources.py --> source_log (hash-based
             --> docs/DPDP_Rules_2025.docx          --> data/DPDP_Rules_Tracker.xlsx
             --> docs/DPDP_Act_2023.docx                (Master_Provisions/Change_Log/
                 (legal-style layout,                     Source_Log — links jump
-                 bookmarked, amendment                    straight into the docx)
-                 highlighting)
+                 bookmarked, amendment                    straight into the docx,
+                 highlighting, provenance                 relative to the workbook)
+                 + "not legal advice")
 
 src/run_pipeline.py orchestrates all of the above; src/notify.py sends one
 summary email per run (Gmail SMTP) regardless of whether anything changed.
@@ -97,6 +98,43 @@ mis-highlights. The Excel tracker mirrors this: `Change_Log` fills an
 entire row light yellow only for a `regulatory` row, and
 `Master_Provisions` gets a computed `Last_Regulatory_Change` cell
 (highlighted, never the whole row).
+
+**EVERY government change to a provision is shown, not just the latest one.**
+`export_word.fetch_amendments` asks `change_log` for every applied
+`regulatory` change to a provision, newest first, and both exporters use that
+one query so they can never disagree. Each change is highlighted at every
+place its changed words appear, and the caption names each one; the
+`Last_Regulatory_Change` cell shows the newest and adds "(+N earlier)" when
+there is more history behind it.
+
+This replaced a version that followed `provisions.latest_change_id` and then
+checked whether what it found was `regulatory`. That had two faults the audit
+found. A data correction applied *after* a real amendment moved the pointer,
+the check rejected it, and the amendment's highlighting, caption and Excel
+cell all vanished without a word (**H-6**) — so the old README claim that data
+corrections "never affect rendering" was false: they erased an earlier
+amendment's rendering. And because only one row was ever returned, a provision
+amended twice looked as though it had been amended once (**M-1**). The rule as
+written now holds: **a data correction never changes what the documents show as
+a change in the law.**
+
+### What the generated files say about themselves
+
+Both Word documents carry, at the top: the date they were last regenerated, the
+date the text is accurate as at, the date of the most recent government change
+recorded in them, and the sentence **"This is a reading copy generated from the
+project database. It is not legal advice. Verify any clause you quote against
+the official Gazette."** The Rules document also says that it incorporates
+Corrigendum G.S.R. 892(E) of 10 December 2025, whose corrections its text
+carries (audit finding L-8 — a document that may reach a client needs to say
+what it is).
+
+The Excel tracker's "Open full text" links are **relative to the workbook**
+(`../docs/DPDP_Rules_2025.docx#DPDPR_R23`), so they work for whoever opens the
+file. Every one of the 79 links used to be an absolute path on whichever
+machine generated the workbook — in the committed file, a folder inside a past
+AI session's sandbox that has never existed on anyone's computer (audit finding
+H-4). The links only start working once the workbook is regenerated.
 
 ## Sources & change detection
 
@@ -181,8 +219,15 @@ it reaches the run's exit code and the daily email.
 metadata churn and HTML analytics-script noise don't cause false-positive
 "changes." Each source has exactly one row in `source_log` (its `url`
 column is `UNIQUE`) that gets updated on every fetch, not a new row per
-run — so `source_log` shows what's being watched right now, not a history
-of past runs. A download failure keeps the last known-good fingerprint
+run. A source that is no longer watched — a one-off Gazette PDF fetched by
+hand, a page that has been retired — keeps its row, because that row records
+which change came from where, and is marked `source_log.watched = 0` instead.
+**The Excel Source_Log sheet shows only `watched = 1` rows**, so it really does
+show what is being watched right now. (Before 30 Sep 2026 it showed all seven
+rows while describing itself as "what's being watched right now", when only
+three were — audit finding M-5. The flag is set by
+`scripts/mark_unwatched_sources_2026-09-30.py`.) A download failure keeps the
+last known-good fingerprint
 (doesn't blank it) and is surfaced into the run's error list and exit
 code, rather than being silently swallowed.
 
@@ -425,6 +470,23 @@ database has changed automatically. If a newly-found document's PDF can't be
 read for some reason, it's still alerted (never silently dropped) — just
 without an excerpt.
 
+**Three checks stop a quiet failure looking like "nothing new" (audit M-6,
+M-7, M-12):**
+
+- The eGazette results page prints its own total ("Total No. of Gazettes : 5").
+  That number is read and compared with the number of rows actually scraped. If
+  they disagree the run **fails loudly**, because a half-read listing and a
+  genuinely empty month look identical from the outside.
+- One badly-formatted Gazette ID used to make the whole day's listing
+  unusable. Now the good rows are kept, and the bad one is named in the day's
+  errors with a "please look this one up by hand" note.
+- The search is scoped to calendar months, so an outage longer than its normal
+  two-month window meant whole months were never looked at again by any later
+  run. When the last successful discovery run is more than 25 days old the
+  window widens to cover everything since that run — capped at 12 months, with
+  a pause between months to stay polite, and the widening is always reported.
+  Anything older than the cap is named as **not** checked.
+
 ## Not yet built
 
 - A stable, verified eGazette search/filter endpoint **for the main daily
@@ -458,12 +520,36 @@ without an excerpt.
   measured a genuine, correctly-identified amendment at 0.65, so a
   threshold would have blocked a real change. Treat the number as a hint
   when reviewing, not as a safety mechanism.
-- **The Excel tracker's README sheet is out of date** on two points: it
-  says `Review_Status` only records the AI's confidence (the 79 provisions
-  and 142 change rows were reviewed by a person on 29 Sep 2026), and its
-  wording predates the source-authority rule above. The sheet is generated
-  from `src/export_excel.py`, and the file itself is owned by the daily
-  bot, so it is corrected on `main` rather than on a working branch.
+- **MeitY's own document-listing pages return HTTP 403** to anything that
+  is not a human with a browser, so they cannot be watched directly and no
+  attempt is made to work around it (this project does not bypass any site's
+  protections). Everything MeitY publishes is therefore seen only through
+  eGazette's ministry search, or not at all.
+- **If MeitY re-publishes a document at a new URL, that is invisible to the
+  four fixed sources.** They are watched by address: a new address is a new
+  document, which only the discovery layer might notice, and only if it also
+  appears in eGazette's MeitY listing. This is not hypothetical — MeitY has
+  still never corrected the Rules PDF itself, ten months after the corrigendum,
+  so the corrigendum only ever existed as a separate document.
+- **An amendment made by a ministry other than MeitY would not be found.**
+  eGazette's search is filtered to the Ministry of Electronics & IT. A DPDP-
+  relevant change issued by another ministry, or by a body publishing outside
+  the Gazette, is outside everything this project looks at.
+- **The distributed Excel file's "Open full text" links do not work until the
+  workbook is next regenerated** — see H-4 above. The fix is in the code; the
+  committed `.xlsx` still holds the old absolute paths.
+- **The Fourth Schedule Note's corrigendum relabelling is captioned, not
+  highlighted.** Corrigendum G.S.R. 892(E) item (v)(b) relabels a run of items
+  that spans several paragraphs, and the renderer only highlights text it finds
+  whole inside one paragraph — deliberately, so it can never highlight the
+  wrong words. That change is named in the provision's caption and is a yellow
+  row in the Excel Change_Log; it just has no yellow words in the Word file.
+- **Two run-in separator dashes in the Fifth Schedule are still missing.** The
+  Gazette prints `namely:-` in two places where the database has `namely:`.
+  They are recorded as reviewed exceptions in
+  `tests/test_legal_text_verbatim.py`; the 30 Sep 2026 restore script fixed the
+  15 numbered-heading dashes it was scoped to and deliberately left these two.
+  A small follow-up.
 - The document-discovery layer only watches MeitY notifications via
   eGazette — PIB was investigated as a second discovery source and ruled
   out (its feed holds only 20 items across every ministry, with no date on
