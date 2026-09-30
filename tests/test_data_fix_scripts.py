@@ -9,8 +9,45 @@ M-11} Schedule's paraphrased wording and the 15 missing heading dashes.
 M-5   scripts/mark_unwatched_sources_2026-09-30.py — marks the four retired
       source_log rows as no longer watched.
 
-Every test here runs against a THROWAWAY COPY of the committed database under
-pytest's tmp_path. Nothing touches db/dpdpa.db.
+Every test here runs against a THROWAWAY COPY of a database under pytest's
+tmp_path. Nothing touches db/dpdpa.db.
+
+WHICH database is copied, and why it is a committed fixture rather than the
+live one
+-------------------------------------------------------------------------
+These tests used to copy db/dpdpa.db. That was wrong in two ways, and both
+bit on 30 September 2026:
+
+  * The scripts were then RUN on db/dpdpa.db. A copy of an already-repaired
+    database makes every script a no-op, so the tests that check what --apply
+    DOES could no longer check anything. (`test_the_three_scripts_run_together
+    _in_order` still passed — but only because the numbers it asserts were
+    already true before it did anything. A test that cannot fail is not a
+    test; see CLAUDE.md.)
+  * The daily pipeline commits db/dpdpa.db back to `main` every day, and every
+    entry point calls init_schema(), which ADDS any missing column. So the
+    committed database's shape moves on its own, without anybody editing a
+    test. That is exactly what broke the schema-migration test below: the bot's
+    commit 7601d1e added the `watched` column.
+
+So the starting point is now a FIXED, committed file that nothing else writes
+to: tests/fixtures/dpdpa_pre_repair.db.
+
+How that fixture was made (reproducible):
+    git show 83207c2:db/dpdpa.db > tests/fixtures/dpdpa_pre_repair.db
+    # then VACUUM (sqlite3's "compact the file" command) to shrink it
+Commit 83207c2 ("Audit fixes: sessions 1-3 (verified)") is the last commit
+before BOTH the daily bot's schema migration AND Gautam's 30 Sep data repair.
+It therefore genuinely holds the pre-repair state these scripts were written
+against: 142 change_log rows (newest CHG-0095), the paraphrased Seventh
+Schedule, the 15 missing heading dashes, all 7 source_log rows, and no
+`watched` column. It is committed whole rather than trimmed, so it is a
+faithful "before" picture; it never changes again.
+
+The fixture is deliberately NOT produced by `git show` at test time: GitHub
+Actions checks out only the latest commit by default, so a test that reaches
+into history would fail in CI — and once this branch is merged, the repaired
+database becomes HEAD and the tests would break all over again.
 
 What each script must prove, because these are the properties that make a
 one-off script safe for somebody who is not a developer to run:
@@ -32,6 +69,11 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+# The committed "before the repair" database these scripts were written
+# against — see the module docstring for how it was made and why.
+PRE_REPAIR_DB = REPO_ROOT / "tests" / "fixtures" / "dpdpa_pre_repair.db"
+# The live database, used ONLY (read-only, via a copy) to prove the scripts are
+# safe to run a second time on the database Gautam has actually repaired.
 LIVE_DB = REPO_ROOT / "db" / "dpdpa.db"
 SCRIPTS = REPO_ROOT / "scripts"
 
@@ -84,6 +126,16 @@ def snapshot(db_path: Path) -> dict:
     return data
 
 
+def source_snapshots(db_path: Path) -> dict:
+    """The stored baselines — the text each source looked like last time."""
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    rows = {r["document_id"]: dict(r) for r in conn.execute(
+        "SELECT document_id, content_hash, content_text, fetched_date FROM source_snapshot")}
+    conn.close()
+    return rows
+
+
 def watched_flags(db_path: Path) -> dict[str, int]:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -95,10 +147,25 @@ def watched_flags(db_path: Path) -> dict[str, int]:
 
 @pytest.fixture
 def db_copy(tmp_path):
-    """A throwaway copy of the committed database."""
+    """A throwaway copy of the committed PRE-REPAIR fixture database."""
+    assert PRE_REPAIR_DB.exists(), (
+        f"{PRE_REPAIR_DB} is missing. It is a committed fixture, not a generated "
+        "file — see this module's docstring for how to rebuild it."
+    )
+    copy = tmp_path / "dpdpa_copy.db"
+    shutil.copy2(PRE_REPAIR_DB, copy)
+    return copy
+
+
+@pytest.fixture
+def repaired_db_copy(tmp_path):
+    """
+    A throwaway copy of the LIVE database — the one Gautam has already run all
+    four scripts on. Used only by the "safe to run twice" test below.
+    """
     if not LIVE_DB.exists():
         pytest.skip("db/dpdpa.db is not present")
-    copy = tmp_path / "dpdpa_copy.db"
+    copy = tmp_path / "dpdpa_live_copy.db"
     shutil.copy2(LIVE_DB, copy)
     return copy
 
@@ -140,12 +207,19 @@ def test_a_dry_run_may_upgrade_the_schema_but_leaves_every_row_alone(script, db_
     this project applies (init_schema). It adds columns that are missing, with
     their defaults. It never changes a value in an existing row, which is what
     the dry-run promise actually is.
+
+    The starting point is the committed pre-repair fixture, which predates the
+    `watched` column. That is a fixed property of a file nothing else writes to
+    — it cannot drift, which is the whole reason this test no longer copies the
+    live database. (It used to, and went red on 30 Sep 2026 when the daily
+    pipeline's own commit added that column to db/dpdpa.db.)
     """
     conn = sqlite3.connect(db_copy)
     before_cols = {r[1] for r in conn.execute("PRAGMA table_info(source_log)")}
     conn.close()
     assert "watched" not in before_cols, (
-        "the committed database is expected to predate the watched column"
+        f"{PRE_REPAIR_DB.name} is supposed to predate the watched column; it now "
+        "has one, so the fixture is not the file this test was written against"
     )
 
     run_script(script, db_copy)
@@ -421,6 +495,50 @@ def test_the_unwatch_script_is_safe_to_run_twice(db_copy):
 # --------------------------------------------------------------------------
 # All three together, in the order Gautam will run them
 # --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("script, already_done_phrase", [
+    ("fix_corrigendum_schedules_2026-09-30.py", "already recorded"),
+    ("restore_verbatim_wording_2026-09-30.py", "Nothing to do"),
+    ("mark_unwatched_sources_2026-09-30.py", "Nothing to do"),
+    ("backfill_source_snapshots_2026-09-30.py", "Nothing to do"),
+])
+def test_running_a_script_again_on_the_repaired_database_changes_nothing(
+    script, already_done_phrase, repaired_db_copy
+):
+    """
+    The "safe to run twice" promise, checked against the database that MATTERS:
+    the live db/dpdpa.db that Gautam has actually repaired.
+
+    Why this test exists. The other tests here start from the committed
+    pre-repair fixture, so they prove "apply, then apply again, changes
+    nothing" on a synthetic before-picture. This one proves the same thing on
+    the real, repaired article — which is what would happen if anybody ran one
+    of these scripts by accident tomorrow. A copy is used; the live database is
+    only ever read.
+
+    backfill_source_snapshots is included here and nowhere else in this file:
+    it reaches out to the network to fetch a source, which tests must not do.
+    On an already-backfilled database it finds nothing missing and returns
+    BEFORE any fetch, so no network call happens. If that ever stops being
+    true this test will notice, because the run must still change nothing —
+    and the baselines are compared here as well, which no other test does.
+    """
+    before = snapshot(repaired_db_copy)
+    before_watched = watched_flags(repaired_db_copy)
+    before_baselines = source_snapshots(repaired_db_copy)
+    result = run_script(script, repaired_db_copy, "--apply")
+    assert snapshot(repaired_db_copy) == before, (
+        f"{script} changed the already-repaired database on a second --apply"
+    )
+    assert watched_flags(repaired_db_copy) == before_watched
+    assert source_snapshots(repaired_db_copy) == before_baselines, (
+        f"{script} rewrote a stored baseline on a second --apply"
+    )
+    if already_done_phrase:
+        assert already_done_phrase in result.stdout, (
+            f"{script} did not say it had nothing left to do:\n{result.stdout}"
+        )
+
 
 def test_the_three_scripts_run_together_in_order(db_copy):
     for script in (UNWATCH_SCRIPT, RESTORE_SCRIPT, CORRIGENDUM_SCRIPT):

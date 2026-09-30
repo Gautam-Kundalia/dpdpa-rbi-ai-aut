@@ -1,5 +1,107 @@
 # Changelog
 
+## 2026-09-30 — The audit's data repairs were actually applied, and the tests were taught the new database (branch `apply-data-fixes-2026-09-30`, not pushed)
+
+Jargon, once, because this entry needs three words:
+
+- A **fixture** is a small file kept alongside the tests that gives them a
+  fixed, known starting point, so a test always begins from the same place.
+- A **regression test** is a test written after a problem is fixed, whose only
+  job is to go red if that same problem ever comes back.
+- To **mutate** a test is to deliberately break the thing it checks and confirm
+  the test notices. A test that stays green when you break the code is not
+  testing anything.
+
+### What happened before this session
+
+Gautam ran the four one-off repair scripts with `--apply` against the real
+`db/dpdpa.db`, then regenerated the Word and Excel outputs. The repair did
+exactly what its dry run had promised. But `python -m pytest` then reported
+**11 failures**, where the day before it had reported none.
+
+### What those 11 failures actually were
+
+None of them was a fault in the repair. They were three separate things:
+
+1. **Eight tests were reading the live database.** These tests exist to prove
+   what the repair scripts *do*, and they did that by copying `db/dpdpa.db` and
+   running the scripts on the copy. Once the real database had been repaired,
+   that copy was already repaired too, so the scripts correctly said "nothing
+   to do" and the tests had nothing left to observe.
+
+   Three of those eight had in fact been broken slightly earlier, and not by
+   the repair at all: they assert that the starting database predates a column
+   called `watched`, and the **daily pipeline's own automated commit** on
+   30 September added that column to the copy of the database stored in Git.
+
+   The fix is a fixture: `tests/fixtures/dpdpa_pre_repair.db`, taken from
+   commit `83207c2` — the last commit before both the bot's column and the
+   repair. Nothing writes to it, so it cannot drift again.
+
+   Worth saying plainly: several of these eight tests were still *passing*,
+   and that was worse than failing. `test_the_three_scripts_run_together_in_
+   order` is the clearest case: every number it checks — 149 change-log rows,
+   3 watched sources, 7 government changes — was already true of the repaired
+   database before the test did anything, so it could not have failed.
+   `test_applying_retires_exactly_four_sources_and_deletes_nothing`,
+   `test_the_corrigendum_pairs_are_unique_where_they_have_to_be` and
+   `test_the_new_rows_show_up_as_yellow_change_log_rows_and_schedule_highlights`
+   were in the same position. Under this project's own rule — a test that
+   cannot fail is not a test — these were the most misleading of the eight, and
+   the fixture is what gives them their teeth back: against it, all three of
+   the three-scripts test's numbers are false until the scripts actually run.
+
+2. **Two tests were about wording that no longer exists.** The verbatim guard
+   keeps a list of reviewed, documented differences between our stored text and
+   the official Gazette PDF. The repair corrected the wording those entries
+   described, so they became dead weight — and the project's own housekeeping
+   test says so and names them. Sixteen entries were deleted.
+
+   Deleting them is not tidying. While the Seventh Schedule entry existed, the
+   guard **excused** that paraphrase — so if anybody had put the old wording
+   back, the guard would have waved it through. With the entry gone, it is
+   caught. There is now a regression test that proves exactly that.
+
+   Two entries were deliberately kept: the Fifth Schedule's two "run-in"
+   separator dashes are still genuinely missing from the database, and are
+   still listed as open follow-up work.
+
+3. **One test was a real problem, and the most important of the three.**
+   `test_seeding_rules_reproduces_committed_full_text` compares the database
+   against what the seeding script would produce. It failed because the seed
+   data still held the *old*, paraphrased wording. In plain words: **anybody
+   re-running the seeding script would have silently undone the repair.**
+
+   The wording lives in `data/rules_verbatim_2026-09-23.json`, not in the
+   Python file, and the three corrected rows were re-dumped there straight from
+   the repaired database — not retyped. The chain back to the Gazette is
+   unbroken: the seeded text equals the database text (that test), and the
+   database text equals the official PDF, whose SHA-256 is checked before every
+   comparison (`tests/test_legal_text_verbatim.py`).
+
+### What was checked, not assumed
+
+The repaired database was compared with the pre-repair one table by table and
+column by column. The only differences are the intended ones: `full_text` on
+the three Schedules, seven new `change_log` rows with the right origins, four
+`watched` flags, and one new baseline. `CHG-0089` and `CHG-0091` — the two rows
+the repair must not disturb — are untouched.
+
+Every changed or added test was mutated and watched go red before being
+trusted, including putting the deleted Seventh Schedule exception back and
+removing a repair script's "don't add a second dash" guard.
+
+### One honest limitation
+
+The PDF guard **cannot** catch a missing heading dash, and never could. Its
+fallback deliberately allows differences "confined to punctuation or spacing",
+because a PDF reader's punctuation is not reliable enough to fail legal text
+over. Those 15 dashes were found by a person reading the Gazette, not by a
+test. So they are now protected by a plain test that simply asserts each dash
+is still there, and by the seeding comparison above — not by the guard.
+
+Tests: **188 passing before this session, 219 after.** No AI calls; $0.
+
 ## 2026-09-22 → 2026-09-23 — Silent-failure fixes + Claude migration (commit `fbd1c4e`)
 
 Follow-up to a real-data audit (see `pipeline-architecture-flow.html` / the

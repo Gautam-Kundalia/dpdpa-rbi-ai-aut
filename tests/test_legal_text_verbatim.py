@@ -324,52 +324,31 @@ _KNOWN_EXCEPTIONS: dict[str, list[tuple[str, str, str, str]]] = {
         ('(g) "mental health', '(f) "mental health',
          "Corrigendum item (v)(b) relabelling.", "audit H-5 (corrigendum item (v)(b))"),
     ],
-    # ---- Fifth/Sixth Schedule: the Gazette prints a separator dash after each
-    # ---- numbered paragraph heading ("1. Salary.-"); the database drops it.
-    # ---- TO BE REMOVED BY scripts/restore_verbatim_wording_2026-09-30.py
+    # ---- Fifth Schedule: the two run-in separator dashes that are STILL
+    # ---- missing. The Gazette prints "...of the pay matrix, namely:- (a) level
+    # ---- 17..."; the database drops that dash. Unlike the 15 heading dashes
+    # ---- these were NOT repaired on 30 Sep 2026 — they are listed as an open
+    # ---- follow-up in docs/audit_fixes_2026-09-30.md. They stay here as the
+    # ---- record of a known, still-unfixed difference.
     "DPDPR-SCH5": [
-        ("1. Salary.", "1. Salary.-", "heading separator dash dropped", "audit M-11"),
-        ("2. Provident Fund.", "2. Provident Fund.-", "heading separator dash dropped", "audit M-11"),
-        ("3. Pension and gratuity.", "3. Pension and gratuity.-",
-         "heading separator dash dropped", "audit M-11"),
-        ("4. Travelling allowance. (1)", "4. Travelling allowance.-(1)",
-         "heading separator dash dropped", "audit M-11"),
-        ("5. Medical assistance.", "5. Medical assistance.-",
-         "heading separator dash dropped", "audit M-11"),
-        ("6. Leave.", "6. Leave.-", "heading separator dash dropped", "audit M-11"),
-        ("7. Leave travel concession. (1)", "7. Leave travel concession.-(1)",
-         "heading separator dash dropped", "audit M-11"),
-        ("8. Other terms and conditions of service.", "8. Other terms and conditions of service.-",
-         "heading separator dash dropped", "audit M-11"),
         ("matrix, namely:", "matrix, namely:-",
-         "run-in separator dash dropped before a list", "audit M-11"),
+         "run-in separator dash dropped before a list", "audit M-11 (still open)"),
         ("draw, namely:", "draw, namely:-",
-         "run-in separator dash dropped before a list", "audit M-11"),
+         "run-in separator dash dropped before a list", "audit M-11 (still open)"),
     ],
-    "DPDPR-SCH6": [
-        ("1. Classes of officials.", "1. Classes of officials.-",
-         "heading separator dash dropped", "audit M-11"),
-        ("2. Gratuity.", "2. Gratuity.-", "heading separator dash dropped", "audit M-11"),
-        ("3. Travelling allowance.", "3. Travelling allowance.-",
-         "heading separator dash dropped", "audit M-11"),
-        ("4. Medical assistance.", "4. Medical assistance.-",
-         "heading separator dash dropped", "audit M-11"),
-        ("5. Leave.", "5. Leave.-", "heading separator dash dropped", "audit M-11"),
-        ("6. Leave travel concession.", "6. Leave travel concession.-",
-         "heading separator dash dropped", "audit M-11"),
-        ("7. Other terms and conditions of service.", "7. Other terms and conditions of service.-",
-         "heading separator dash dropped", "audit M-11"),
-    ],
-    # ---- the one real paraphrase left in the corpus ----
-    # ---- TO BE REMOVED BY scripts/restore_verbatim_wording_2026-09-30.py
-    "DPDPR-SCH7": [
-        ("Data Principal for: (i) performance",
-         "Data Principal for the following purposes, namely:- (i) performance",
-         "Seventh Schedule, second row: five words of enacted text "
-         '("the following purposes, namely") were replaced by a colon. This is a '
-         "paraphrase inside provisions.full_text, which this project forbids.",
-         "audit H-7"),
-    ],
+    # ---- Fifth/Sixth/Seventh Schedules: the repaired differences ----
+    # Until 30 Sep 2026 this dict also carried 16 further entries for
+    # DPDPR-SCH5, DPDPR-SCH6 and DPDPR-SCH7 — the 15 missing paragraph-heading
+    # separator dashes (audit M-11) and the Seventh Schedule paraphrase
+    # (audit H-7). scripts/restore_verbatim_wording_2026-09-30.py put the
+    # Gazette's own wording back, so all 16 became dead weight and were
+    # deleted. Those headings and that table row now match the official PDF on
+    # their own merits, with no exception at all — which was the point of the
+    # whole exercise.
+    #
+    # Deleting the H-7 entry is also what gives
+    # test_the_seventh_schedule_paraphrase_is_rejected_if_it_comes_back its
+    # teeth: while that exception existed, the guard excused the paraphrase.
 }
 
 # Second gate on the fallback: how close, in order, the stored text must be to
@@ -693,20 +672,168 @@ def test_a_dropped_clause_is_caught(rules_pdf_text):
     assert check_rules_provision("DPDPR-R19", mutated, rules_pdf_text) != []
 
 
-def test_a_known_exception_only_applies_to_its_own_exact_text(rules_pdf_text):
+# A made-up provision, a made-up piece of "Gazette", and a made-up exception,
+# used by the test below. Nothing here is real law and none of it is in the
+# database — that is deliberate. This test used to be written against the real
+# DPDPR-SCH7 paraphrase, which meant it stopped working the moment that
+# paraphrase was corrected (30 Sep 2026). A test of the exception MECHANISM
+# should not depend on the corpus still containing a defect.
+_SYNTHETIC_PROVISION = "TEST-SYNTHETIC-SCHEDULE"
+# What our invented "Gazette" prints.
+_SYNTHETIC_PDF = (
+    "Fourteenth Schedule (see rule 99) The Registrar shall maintain a register "
+    "of widgets for the following purposes, namely: — (i) inspection by any "
+    "person on payment of the prescribed fee; or (ii) publication in such "
+    "manner as may be specified."
+)
+# What our invented "database" holds: the same passage with the same five words
+# dropped and replaced by a colon — the exact shape of the real audit H-7
+# paraphrase, so this test exercises the mechanism that mattered.
+_SYNTHETIC_STORED = (
+    "The Registrar shall maintain a register of widgets for: (i) inspection by "
+    "any person on payment of the prescribed fee; or (ii) publication in such "
+    "manner as may be specified."
+)
+# Both sides are written in NORMALIZED form, because check_rules_piece applies
+# exceptions after _normalize_rules has run — which is why the dash here is a
+# plain "-" glued to the colon rather than the " — " the Gazette prints. The
+# real audit H-7 entry was written the same way.
+_SYNTHETIC_EXCEPTION = [(
+    "register of widgets for: (i) inspection",
+    "register of widgets for the following purposes, namely:- (i) inspection",
+    "invented, for test_a_known_exception_only_applies_to_its_own_exact_text only",
+    "not a real finding",
+)]
+
+
+def test_a_known_exception_only_applies_to_its_own_exact_text(monkeypatch):
     """
     The point of the exception format: an exception is keyed to the exact
     string the database holds today. Change that string to something else and
     the exception stops applying, so the guard fails instead of waving it
     through. This is what stops a documented exception from hiding a new
     problem in the same place.
+
+    Proved on invented text (see above), so it keeps working no matter what the
+    real corpus says. Three steps, and all three have to hold or the exception
+    format is not doing its job:
+
+      1. without the exception, the stored text FAILS — so there is a real
+         difference here for an exception to excuse;
+      2. with the exception, that exact stored text PASSES;
+      3. with the exception still in place but the stored text changed, it
+         FAILS again — the exception shelters its own reviewed string and
+         nothing else.
+    """
+    pdf = _normalize_rules(_SYNTHETIC_PDF)
+    stored = _SYNTHETIC_STORED
+
+    # 1. No exception registered yet: the paraphrase must be caught.
+    assert check_rules_piece("synthetic", _SYNTHETIC_PROVISION, stored, pdf) is not None, (
+        "the invented paraphrase was not caught even with no exception — this "
+        "test would prove nothing"
+    )
+
+    # 2. Register the invented exception; the same text now passes.
+    monkeypatch.setitem(_KNOWN_EXCEPTIONS, _SYNTHETIC_PROVISION, _SYNTHETIC_EXCEPTION)
+    assert check_rules_piece("synthetic", _SYNTHETIC_PROVISION, stored, pdf) is None, (
+        "the reviewed exception did not excuse the exact text it names"
+    )
+
+    # 3. Change the stored text. The exception names the old string, so it no
+    #    longer applies, and the guard must fail rather than wave this through.
+    mutated = stored.replace("register of widgets for:", "register of gadgets for:", 1)
+    assert mutated != stored
+    assert check_rules_piece("synthetic", _SYNTHETIC_PROVISION, mutated, pdf) is not None, (
+        "an exception sheltered text it does not name"
+    )
+
+
+def test_the_seventh_schedule_paraphrase_is_rejected_if_it_comes_back(rules_pdf_text):
+    """
+    Regression guard for audit finding H-7.
+
+    The Seventh Schedule used to hold "...of a Data Principal for: (i)
+    performance..." where the Gazette prints "...for the following purposes,
+    namely: — (i) performance...". Five words of enacted law had been replaced
+    by a colon. The repair put them back on 30 Sep 2026.
+
+    This proves the guard would now CATCH that paraphrase if anybody
+    re-introduced it — which it could not do before, because the difference was
+    listed as a reviewed exception and therefore excused. Deleting that
+    exception is what gives this test its teeth.
+
+    The live database is only READ here. The paraphrase is put back in a Python
+    string in memory; db/dpdpa.db is never opened for writing.
     """
     stored = dict(_rules_provisions())["DPDPR-SCH7"]
-    assert "Data Principal for: (i) performance" in _normalize_rules(stored)
-    # Same shape as the H-7 exception, different (invented) wording.
-    mutated = stored.replace("of a Data Principal for:", "of a Data Principal only for:", 1)
-    assert mutated != stored
-    assert check_rules_provision("DPDPR-SCH7", mutated, rules_pdf_text) != []
+    restored_wording = "for the following purposes, namely: — (i) performance"
+    assert restored_wording in stored, (
+        "DPDPR-SCH7 no longer holds the Gazette's wording — the H-7 repair has "
+        "been undone in the database"
+    )
+    assert check_rules_provision("DPDPR-SCH7", stored, rules_pdf_text) == [], (
+        "the unmutated row should pass — the mutation below proves nothing otherwise"
+    )
+
+    paraphrased = stored.replace(restored_wording, "for: (i) performance", 1)
+    assert paraphrased != stored
+    assert check_rules_provision("DPDPR-SCH7", paraphrased, rules_pdf_text) != [], (
+        "the audit H-7 paraphrase was waved through — a reviewed exception for it "
+        "has come back, or the ordered fallback has been loosened"
+    )
+
+
+# The 15 numbered paragraph headings the Gazette prints with a separator dash,
+# and the database dropped until the 30 Sep 2026 repair (audit M-11).
+_HEADING_DASHES = [
+    ("DPDPR-SCH5", "1. **Salary.** —"),
+    ("DPDPR-SCH5", "2. **Provident Fund.** —"),
+    ("DPDPR-SCH5", "3. **Pension and gratuity.** —"),
+    ("DPDPR-SCH5", "4. **Travelling allowance.** —"),
+    ("DPDPR-SCH5", "5. **Medical assistance.** —"),
+    ("DPDPR-SCH5", "6. **Leave.** —"),
+    ("DPDPR-SCH5", "7. **Leave travel concession.** —"),
+    ("DPDPR-SCH5", "8. **Other terms and conditions of service.** —"),
+    ("DPDPR-SCH6", "1. **Classes of officials.** —"),
+    ("DPDPR-SCH6", "2. **Gratuity.** —"),
+    ("DPDPR-SCH6", "3. **Travelling allowance.** —"),
+    ("DPDPR-SCH6", "4. **Medical assistance.** —"),
+    ("DPDPR-SCH6", "5. **Leave.** —"),
+    ("DPDPR-SCH6", "6. **Leave travel concession.** —"),
+    ("DPDPR-SCH6", "7. **Other terms and conditions of service.** —"),
+]
+
+
+@pytest.mark.parametrize("provision_id, heading", _HEADING_DASHES,
+                         ids=[f"{p}-{h.split('**')[1]}" for p, h in _HEADING_DASHES])
+def test_a_restored_heading_dash_is_still_there(provision_id, heading):
+    """
+    Regression guard for audit finding M-11, and an honest note about what the
+    PDF guard can and cannot do.
+
+    The PDF guard above CANNOT catch a missing heading dash. Read
+    _ordered_match's docstring: its fallback deliberately passes anything whose
+    every difference is "confined to punctuation or spacing", and a dash is
+    punctuation. That is the right design — PyMuPDF's reading of a Gazette PDF
+    is not reliable enough at the punctuation level to fail a row over it — but
+    it does mean these 15 dashes were only ever found because a person read the
+    Gazette next to the database, not because a test found them. Deleting their
+    reviewed exceptions does not change that either way.
+
+    So the protection for them is this test, which does not go through the
+    guard at all: it simply asserts, heading by heading, that the Gazette's dash
+    is still in the stored text. Re-seed the database from an old seed script,
+    or hand-edit the text back, and this goes red and names the heading.
+
+    The live database is only READ.
+    """
+    stored = dict(_rules_provisions())[provision_id]
+    assert heading in stored, (
+        f"{provision_id}: the Gazette prints a separator dash after the heading "
+        f"{heading.split('**')[1]!r}, and the stored text has lost it again "
+        f"(audit M-11 was repaired on 30 Sep 2026)"
+    )
 
 
 @pytest.mark.parametrize(
@@ -731,15 +858,19 @@ def test_an_exception_does_not_shelter_the_rest_of_its_provision(
     `test_a_known_exception_only_applies_to_its_own_exact_text` above proves an
     exception stops applying once the text it names changes. This proves the
     opposite-facing property: an exception must not quietly excuse the WHOLE
-    provision it is listed under. Every provision used here carries at least one
-    reviewed exception, and each mutation is deliberately placed somewhere else
-    in that provision — in one case in the very same Schedule table row as the
-    excepted phrase. The guard must still fail.
+    provision it is listed under. Each mutation is deliberately placed away from
+    any excepted phrase — in one case in the very same Schedule table row. The
+    guard must still fail.
 
-    Why this matters in plain words: the Fourth to Seventh Schedules hold seven
-    of the eight provisions that have an exception recorded against them. If
-    "has an exception" meant "is not really checked", those Schedules would be
-    unguarded legal text while the test suite still reported all green.
+    Why this matters in plain words: if "has an exception" meant "is not really
+    checked", a Schedule would be unguarded legal text while the test suite
+    still reported all green.
+
+    Note on the rows used. DPDPR-SCH4 is the one here that still carries
+    reviewed exceptions, so it is the row that actually tests the sheltering
+    question. DPDPR-SCH5, SCH6 and SCH7 lost their exceptions in the 30 Sep 2026
+    repair; they are kept in this list as plain mutation coverage of the
+    Schedules, which is worth having on its own.
     """
     stored = dict(_rules_provisions())[provision_id]
     assert find in stored, f"{find!r} is no longer in {provision_id} — update this test"
