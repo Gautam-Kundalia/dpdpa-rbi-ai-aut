@@ -56,6 +56,25 @@ EFF_GROUP_B = ("2026-11-13", "In force one year after Gazette publication (Rule 
 EFF_GROUP_C = ("2027-05-13", "In force eighteen months after Gazette publication (Rule 1(4)) — not yet operative.")
 
 # (provision_id, reference, topic, summary, effective_group, full_text)
+#
+# READ THIS BEFORE TRUSTING THE TEXT BELOW.
+#
+# The sixth element is NOT the text that gets seeded. main() ignores it (it
+# unpacks it as `_tuple_full_text`) and takes every provision's wording from
+# data/rules_verbatim_2026-09-23.json instead — see load_verbatim_full_text().
+# The JSON is the authority, because it is the copy that has been checked
+# word-for-word against the official Gazette PDFs by
+# tests/test_legal_text_verbatim.py.
+#
+# The text below is the original September 2025 typing, kept for the
+# provision_id / reference / topic / summary columns that main() DOES use. It
+# has drifted from the JSON in 7 rows (DPDPR-R1, R23, SDF-R13, SCH1, SCH3,
+# SCH4, SCH5), because corrections made since then — the G.S.R. 892(E)
+# corrigendum, and the Notes and Illustrations restored by the 23 Sep 2026
+# audit — were applied to the database and the JSON but not here.
+#
+# So: do not quote the wording below as law, and do not "fix" a row here
+# expecting it to change what gets seeded. Change the JSON.
 PROVISIONS = [
     ("DPDPR-R1", "Rule 1", "Other",
      "Short title (Digital Personal Data Protection Rules, 2025) and staggered commencement schedule for different rules.",
@@ -716,17 +735,17 @@ PROVISIONS = [
      EFF_GROUP_A,
      "**Fifth Schedule** *(see rule 18)*\n\n"
      "**Terms and conditions of service of Chairperson and other Members**\n\n"
-     "1. **Salary.** (1) The Chairperson shall be entitled to receive a consolidated salary of rupees four "
+     "1. **Salary.** — (1) The Chairperson shall be entitled to receive a consolidated salary of rupees four "
      "lakh fifty thousand per month, without the facility of house and car. (2) Every Member other than the "
      "Chairperson shall be entitled to receive a consolidated salary of rupees four lakh per month, without "
      "the facility of house and car.\n\n"
-     "2. **Provident Fund.** The Chairperson and every other Member shall be eligible to contribute to the "
+     "2. **Provident Fund.** — The Chairperson and every other Member shall be eligible to contribute to the "
      "Provident Fund of the Board, and the manner and terms and conditions applicable in this regard shall, "
      "mutatis mutandis, be the same as those applicable to other officers and employees of the Board for their "
      "Provident Fund.\n\n"
-     "3. **Pension and gratuity.** The Chairperson and every other Member shall not be entitled to payment of "
+     "3. **Pension and gratuity.** — The Chairperson and every other Member shall not be entitled to payment of "
      "pension or gratuity for service rendered in the Board.\n\n"
-     "4. **Travelling allowance.** (1) The Chairperson and every other Member, while on transfer to join the "
+     "4. **Travelling allowance.** — (1) The Chairperson and every other Member, while on transfer to join the "
      "Board, or on the expiry of her term with the Board for proceeding to her home town with family "
      "(including in respect of journey undertaken by her and her family), or on tour within India, shall be "
      "entitled to journey allowance, daily allowance and reimbursement of expense on transportation of "
@@ -738,14 +757,14 @@ PROVISIONS = [
      "officer of the Central Government, in the following level of the pay matrix, is entitled to draw, "
      "namely: (a) level 17, in the case of the Chairperson; and (b) level 15, in the case of every other "
      "Member.\n\n"
-     "5. **Medical assistance.** (1) The Chairperson and every other Member shall be entitled to such medical "
+     "5. **Medical assistance.** — (1) The Chairperson and every other Member shall be entitled to such medical "
      "assistance as may be admissible to them under any group health insurance scheme of the Board for "
      "officers and employees of the Board and their eligible dependants. (2) If the Chairperson or other "
      "Member has retired from Government service, or from the service of a public sector entity or a body "
      "corporate established by a Central Act, Provincial Act or State Act, and there are a separate set of "
      "rules for the grant of medical assistance for such service, she may, in lieu of medical assistance under "
      "sub-paragraph (1), opt to be governed by such rules.\n\n"
-     "6. **Leave.** (1) The authority competent to sanction leave shall be the Central Government in respect "
+     "6. **Leave.** — (1) The authority competent to sanction leave shall be the Central Government in respect "
      "of the Chairperson, and the Chairperson in respect of any other Member. (2) The Chairperson and every "
      "other Member may avail of such kinds of leave as are admissible to a Government servant under sub-clause "
      "(i) of clause (a) and clause (b) of sub-rule (1) of rule 26, rules 27, 29, 30 and 40 to 43-C of the "
@@ -762,7 +781,7 @@ PROVISIONS = [
      "rule 39, rule 39-A and rule 39-C of the Leave Rules, subject to the maximum extent of encashment under "
      "any of the said rules, other than rule 38-A, being fifty per cent. of the earned leave standing to her "
      "credit.\n\n"
-     "7. **Leave travel concession.** (1) Leave travel concession shall be admissible to the Chairperson and "
+     "7. **Leave travel concession.** — (1) Leave travel concession shall be admissible to the Chairperson and "
      "every other Member in accordance with the provisions applicable to persons appointed to civil services "
      "and posts in connection with the affairs of the Union of India under rule 3, clauses (a) and (d) of "
      "rule 4, rules 5 to 15 and rule 17 of the Central Civil Services (Leave Travel Concession) Rules, 1988, "
@@ -772,7 +791,7 @@ PROVISIONS = [
      "Member shall be eligible to avail of either leave travel concession to home town or leave travel "
      "concession to any place in India in any period of two years from the date of assumption of their office "
      "as a Member.\n\n"
-     "8. **Other terms and conditions of service.** (1) The Chairperson and every other Member shall ensure "
+     "8. **Other terms and conditions of service.** — (1) The Chairperson and every other Member shall ensure "
      "absence of conflict of interest in the performance of the functions of her office and shall not have any "
      "such financial or other interests as are likely to prejudicially affect the performance of the functions "
      "of such office. (2) The provisions contained in Part IV to Part IX of the Central Civil Services "
@@ -793,7 +812,7 @@ PROVISIONS = [
      EFF_GROUP_A,
      "**Sixth Schedule** *(see rule 21(2))*\n\n"
      "**Terms and conditions of appointment and service of officers and employees of Board**\n\n"
-     "1. **Classes of officials.** (1) The Board may, in accordance with the Fundamental Rules and applicable "
+     "1. **Classes of officials.** — (1) The Board may, in accordance with the Fundamental Rules and applicable "
      "guidelines issued by the Ministry of Personnel, Public Grievances and Pensions, Department of Personnel "
      "and Training, appoint officers and employees on deputation from the Central Government, a State "
      "Government, an autonomous body under the overall control of the Central Government or a State "
@@ -801,24 +820,24 @@ PROVISIONS = [
      "(2) The Board may also receive or take on deputation any officer or other employee from the National "
      "Institute for Smart Government, for a period not exceeding five years, with salary and allowances "
      "guided by market standards and on such other terms and conditions as the Board may decide.\n\n"
-     "2. **Gratuity.** The officers and employees shall be entitled to payment of such gratuity as may be "
+     "2. **Gratuity.** — The officers and employees shall be entitled to payment of such gratuity as may be "
      "admissible under the Payment of Gratuity Act, 1972 (39 of 1972).\n\n"
-     "3. **Travelling allowance.** The travelling allowance payable to the officers and employees shall, "
+     "3. **Travelling allowance.** — The travelling allowance payable to the officers and employees shall, "
      "mutatis mutandis, be the same as those applicable to the officers and employees of the Central "
      "Government.\n\n"
-     "4. **Medical assistance.** The officers and employees shall be entitled to such medical assistance as "
+     "4. **Medical assistance.** — The officers and employees shall be entitled to such medical assistance as "
      "may be admissible to them and their eligible dependants under any group health insurance scheme of the "
      "Board, made with the previous approval of the Central Government.\n\n"
-     "5. **Leave.** (1) The officers and employees may avail of such kinds of leaves as are admissible to a "
+     "5. **Leave.** — (1) The officers and employees may avail of such kinds of leaves as are admissible to a "
      "Government servant under the Central Civil Services (Leave) Rules, 1972, subject to the conditions "
      "applicable under the said rules, and shall be eligible for encashment of earned leave as provided "
      "therein. (2) The officers and employees shall be entitled to casual leave to such extent as is "
      "admissible to a Government servant under instructions issued by the Central Government.\n\n"
-     "6. **Leave travel concession.** Leave travel concession shall be admissible to the officers and "
+     "6. **Leave travel concession.** — Leave travel concession shall be admissible to the officers and "
      "employees appointed under clause (1) of paragraph 1, in accordance with the provisions applicable to "
      "persons appointed to civil services and posts in connection with the affairs of the Union of India under "
      "the Central Civil Services (Leave Travel Concession) Rules, 1988.\n\n"
-     "7. **Other terms and conditions of service.** (1) The provisions of the Civil Service (Conduct) Rules, "
+     "7. **Other terms and conditions of service.** — (1) The provisions of the Civil Service (Conduct) Rules, "
      "1964 shall apply to the officers and employees in like manner as applicable to a person appointed to a "
      "civil service or post in connection with the affairs of the Union of India under the said rules. "
      "(2) The provisions contained in Part IV to Part IX of the Central Civil Services (Classification, "
@@ -840,7 +859,7 @@ PROVISIONS = [
      "of any of its instrumentalities notified under clause (a) of sub-section (2) of section 17 of the Act, "
      "as the Central Government or the head of such instrumentality, as the case may be, may designate in "
      "this behalf. |\n"
-     "| Use, by the State or any of its instrumentalities, of personal data of a Data Principal for: (i) "
+     "| Use, by the State or any of its instrumentalities, of personal data of a Data Principal for the following purposes, namely: — (i) "
      "performance of any function under any law for the time being in force in India; or (ii) disclosure of "
      "any information for fulfilling any obligation under any law for the time being in force in India. | "
      "Person authorised under applicable law. |\n"
