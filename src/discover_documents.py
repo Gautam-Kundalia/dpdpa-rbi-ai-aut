@@ -95,6 +95,27 @@ EGAZETTE_BASE = "https://egazette.gov.in"
 # fetch_sources.py's own number rather than picking a new one.
 EGAZETTE_TIMEOUT_MS = 60_000
 
+# A pause between months when the search window has been widened after an
+# outage (audit finding M-12). Twelve months in a row is twelve form
+# submissions against a government website; spacing them out is basic manners
+# and keeps the load indistinguishable from a person clicking through.
+EGAZETTE_MONTH_PAUSE_MS = 2_000
+
+# The results page prints its own count, e.g. "Total No. of Gazettes : 5".
+# Cross-checking the rows we scraped against that number is what turns a
+# silently half-scraped page into a loud failure (audit finding M-6).
+EGAZETTE_RESULT_COUNT_RE = re.compile(r"(\d+)")
+
+# How stale the last successful discovery run has to be before the search
+# window is widened from "this month and last month" to "everything since then"
+# (audit finding M-12). 25 days rather than 30: the window is month-scoped, so
+# by day 25 of an outage there is already a real chance a whole month has
+# fallen out of it.
+DISCOVERY_STALE_DAYS = 25
+
+# Never search more than this many months in one run, however long the outage.
+DISCOVERY_MAX_MONTHS = 12
+
 # Case-insensitive; err on the side of too many alerts (a human reviews every
 # alert — nothing here writes to the tracked database on its own).
 KEYWORDS = [
@@ -230,7 +251,7 @@ def _parse_egazette_date(text: str | None) -> str | None:
 
 def _current_and_previous_month(today: date) -> list[tuple[int, int, str]]:
     """[(year, month_number, month_name), ...] for today's month and the one
-    before it — the rolling window this search covers each run."""
+    before it — the rolling window this search covers on an ordinary day."""
     months = [(today.year, today.month)]
     prev_month = today.month - 1 or 12
     prev_year = today.year if today.month > 1 else today.year - 1
@@ -238,11 +259,90 @@ def _current_and_previous_month(today: date) -> list[tuple[int, int, str]]:
     return [(y, m, calendar.month_name[m]) for y, m in months]
 
 
-def _egazette_search_month(page, year: int, month_name: str) -> list[dict]:
-    """Drive the 'Search by Ministry' form for one month/year and return the
-    raw result rows. No CAPTCHA anywhere in this flow (confirmed by hand —
-    see the findings doc); each dropdown pick reloads the page (ASP.NET
-    postback), so each step waits for that navigation before the next."""
+def _months_between(start: date, end: date) -> list[tuple[int, int, str]]:
+    """Every calendar month from `start` to `end` inclusive, oldest first."""
+    months = []
+    year, month = start.year, start.month
+    while (year, month) <= (end.year, end.month):
+        months.append((year, month, calendar.month_name[month]))
+        month += 1
+        if month == 13:
+            year, month = year + 1, 1
+    return months
+
+
+def _last_successful_run(conn, source_name: str) -> date | None:
+    """
+    The most recent date this discovery source ran at all, from
+    discovery_run_log. Returns None if it has never run.
+    """
+    if conn is None:
+        return None
+    row = conn.execute(
+        "SELECT MAX(run_date) d FROM discovery_run_log WHERE discovery_source LIKE ?",
+        (f"{source_name}%",),
+    ).fetchone()
+    if not row or not row["d"]:
+        return None
+    try:
+        return datetime.strptime(row["d"], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _months_to_search(conn, today: date, source_name: str,
+                      warnings: list[str] | None = None) -> list[tuple[int, int, str]]:
+    """
+    Which months to search this run.
+
+    Normally the current month and the previous one, which is the widest
+    window a two-month rolling search can cover. But this search is
+    MONTH-SCOPED: if the job has not run for longer than a month, whole months
+    have fallen out of that window and their documents would be missed
+    permanently — there is no later run that ever looks at them again (audit
+    finding M-12). So after an outage of more than DISCOVERY_STALE_DAYS the
+    window is widened to cover everything since the last successful run,
+    capped at DISCOVERY_MAX_MONTHS so a very long gap cannot turn into an
+    unbounded crawl. Widening is always reported.
+    """
+    last_run = _last_successful_run(conn, source_name)
+    if last_run is None:
+        return _current_and_previous_month(today)
+
+    gap_days = (today - last_run).days
+    if gap_days <= DISCOVERY_STALE_DAYS:
+        return _current_and_previous_month(today)
+
+    months = _months_between(last_run, today)
+    capped = False
+    if len(months) > DISCOVERY_MAX_MONTHS:
+        months = months[-DISCOVERY_MAX_MONTHS:]
+        capped = True
+    note = (
+        f"document discovery for '{source_name}' last ran {gap_days} days ago "
+        f"({last_run.isoformat()}), which is longer than its normal two-month search "
+        f"window, so this run searched {len(months)} month(s) instead of 2 "
+        f"({months[0][2]} {months[0][0]} to {months[-1][2]} {months[-1][0]})."
+    )
+    if capped:
+        note += (f" The window was capped at {DISCOVERY_MAX_MONTHS} months — anything older "
+                 f"than that has NOT been checked and needs a look by hand.")
+    print(f"[discover_documents] {note}")
+    if warnings is not None:
+        warnings.append(note)
+    return months
+
+
+def _egazette_search_month(page, year: int, month_name: str) -> tuple[list[dict], int | None]:
+    """
+    Drive the 'Search by Ministry' form for one month/year. Returns
+    (raw result rows, the total the page itself reported) — the second value is
+    None if the count label could not be read.
+
+    No CAPTCHA anywhere in this flow (confirmed by hand — see the findings
+    doc); each dropdown pick reloads the page (ASP.NET postback), so each step
+    waits for that navigation before the next.
+    """
     # "commit" (not "load"/"networkidle"): waits only for the navigation's
     # response to start arriving, not for every page resource to finish. A
     # real production run still timed out at 60s waiting for "load", even
@@ -272,7 +372,19 @@ def _egazette_search_month(page, year: int, month_name: str) -> list[dict]:
     page.wait_for_selector("#lbl_Result", timeout=EGAZETTE_TIMEOUT_MS)
     page.wait_for_timeout(1000)
 
-    return page.eval_on_selector_all(
+    # The page states how many results it found ("Total No. of Gazettes : 5").
+    # Read it, so a half-rendered or partly-scraped page is a loud failure
+    # rather than a quietly short list (audit finding M-6).
+    reported_total = None
+    try:
+        label = page.inner_text("#lbl_Result")
+        match = EGAZETTE_RESULT_COUNT_RE.search(label or "")
+        if match:
+            reported_total = int(match.group(1))
+    except Exception as exc:
+        print(f"[discover_documents] could not read the results count label: {exc}")
+
+    rows = page.eval_on_selector_all(
         '[id^="gvGazetteList_lbl_Subject_"]',
         """els => els.map(s => {
             const idx = s.id.split('_').pop();
@@ -287,14 +399,22 @@ def _egazette_search_month(page, year: int, month_name: str) -> list[dict]:
             };
         })""",
     )
+    return rows, reported_total
 
 
-def fetch_egazette_meity(today: date | None = None) -> dict:
-    """Search eGazette for MeitY notifications, current + previous calendar
-    month. Returns {"items": [...], "bucket_counts": {...}} — items are
-    keyed by their permanent WriteReadData PDF URL (never the session-scoped
-    search URL, which changes every run), deduplicated across the two months
-    queried; bucket_counts has one entry per month queried, for the canary.
+def fetch_egazette_meity(conn=None, today: date | None = None) -> dict:
+    """
+    Search eGazette for MeitY notifications. Returns
+    {"items": [...], "bucket_counts": {...}, "warnings": [...]}.
+
+    Items are keyed by their permanent WriteReadData PDF URL (never the
+    session-scoped search URL, which changes every run), deduplicated across
+    the months queried. bucket_counts has one entry per month queried, for the
+    canary. warnings are things a human should read but which must not stop the
+    run — they are added to the day's error list by discover_all.
+
+    Which months are searched depends on when this last ran successfully; see
+    _months_to_search (audit finding M-12).
     """
     from playwright.sync_api import sync_playwright  # imported lazily so a
 
@@ -304,6 +424,8 @@ def fetch_egazette_meity(today: date | None = None) -> dict:
     today = today or date.today()
     items_by_url: dict[str, dict] = {}
     bucket_counts: dict[str, int] = {}
+    warnings: list[str] = []
+    months = _months_to_search(conn, today, "egazette-meity", warnings)
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -334,20 +456,49 @@ def fetch_egazette_meity(today: date | None = None) -> dict:
                 if route.request.resource_type in ("image", "font", "stylesheet", "media")
                 else route.continue_(),
             )
-            for year, month_num, month_name in _current_and_previous_month(today):
+            for index, (year, month_num, month_name) in enumerate(months):
+                if index and len(months) > 2:
+                    # Politeness pause, only when the window has been widened.
+                    page.wait_for_timeout(EGAZETTE_MONTH_PAUSE_MS)
                 bucket_key = f"egazette-meity:{year:04d}-{month_num:02d}"
-                rows = _egazette_search_month(page, year, month_name)
+                rows, reported_total = _egazette_search_month(page, year, month_name)
                 bucket_counts[bucket_key] = len(rows)
+
+                # M-6: the page told us how many results it found. If we
+                # scraped a different number, this month's listing cannot be
+                # trusted, and a short listing looks exactly like "nothing new".
+                if reported_total is not None and reported_total != len(rows):
+                    raise RuntimeError(
+                        f"eGazette said it found {reported_total} gazette(s) for "
+                        f"{month_name} {year} but only {len(rows)} row(s) could be read "
+                        f"from the page. Refusing to treat a partly-read listing as the "
+                        f"whole month — a short list is indistinguishable from 'nothing new'."
+                    )
+                if reported_total is None:
+                    warnings.append(
+                        f"eGazette's results-count label could not be read for "
+                        f"{month_name} {year}, so the {len(rows)} row(s) found could not be "
+                        f"cross-checked against the page's own total. Worth a look if it "
+                        f"keeps happening."
+                    )
+
                 for row in rows:
                     gazette_id = row.get("gazetteId")
                     if not gazette_id:
                         continue
                     url = _egazette_pdf_url(gazette_id)
                     if url is None:
-                        raise RuntimeError(
-                            f"could not parse Gazette ID into a document URL: {gazette_id!r} "
-                            f"(subject: {row.get('subject')!r})"
+                        # M-7: one badly-formatted ID used to throw away the
+                        # whole day's listing. Keep every good row, and name the
+                        # bad one for a human instead.
+                        warnings.append(
+                            f"eGazette row skipped for {month_name} {year}: its Gazette ID "
+                            f"{gazette_id!r} is not in the expected "
+                            f"CG-DL-<x>-DDMMYYYY-NNNNNN form, so no document link could be "
+                            f"built. Subject: {row.get('subject')!r}. Please look this one up "
+                            f"by hand on egazette.gov.in."
                         )
+                        continue
                     items_by_url[url] = {
                         "title": row.get("subject") or gazette_id,
                         "url": url,
@@ -356,7 +507,11 @@ def fetch_egazette_meity(today: date | None = None) -> dict:
         finally:
             browser.close()
 
-    return {"items": list(items_by_url.values()), "bucket_counts": bucket_counts}
+    return {
+        "items": list(items_by_url.values()),
+        "bucket_counts": bucket_counts,
+        "warnings": warnings,
+    }
 
 
 DISCOVERY_SOURCES = [
@@ -483,13 +638,19 @@ def discover_all(conn, errors: list[str], dry_run: bool = False) -> tuple[list[d
     for source in DISCOVERY_SOURCES:
         name = source["name"]
         try:
-            result = source["fetch"]()
+            # conn is passed so a source can look up when it last ran and widen
+            # its own search window after an outage (audit M-12).
+            result = source["fetch"](conn=conn)
         except Exception as exc:
             errors.append(f"discovery source '{name}' failed: {exc}")
             continue
 
         items = result["items"]
         bucket_counts = result["bucket_counts"]
+        # Things worth a human's attention that must not stop the run: a
+        # Gazette ID that could not be parsed, a results count that could not be
+        # cross-checked, a widened search window (audit M-6, M-7, M-12).
+        errors.extend(result.get("warnings") or [])
 
         for bucket_key, count in bucket_counts.items():
             _check_canary(conn, bucket_key, today_str, count, errors)

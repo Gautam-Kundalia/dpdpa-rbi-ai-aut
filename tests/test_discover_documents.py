@@ -31,8 +31,15 @@ def _source(name: str, fetch, all_items_relevant: bool = False) -> dict:
     return {"name": name, "fetch": fetch, "all_items_relevant": all_items_relevant}
 
 
-def _static_fetch(name: str, items: list[dict]):
-    return lambda: {"items": items, "bucket_counts": {name: len(items)}}
+def _static_fetch(name: str, items: list[dict], warnings: list[str] | None = None):
+    # discover_all passes conn= now, so a source can look up when it last ran
+    # and widen its own search window after an outage (audit M-12). **kwargs
+    # keeps these stand-ins indifferent to that.
+    return lambda **kwargs: {
+        "items": items,
+        "bucket_counts": {name: len(items)},
+        "warnings": warnings or [],
+    }
 
 
 # --------------------------------------------------------------------------
@@ -84,7 +91,7 @@ def test_corrigendum_replay_is_found_via_pdf_text_not_title_or_url(conn):
 
     calls = {"n": 0}
 
-    def fetch():
+    def fetch(**kwargs):
         calls["n"] += 1
         items = before if calls["n"] == 1 else after
         return {"items": items, "bucket_counts": {"src1": len(items)}}
@@ -116,7 +123,7 @@ def test_irrelevant_document_alerts_only_when_source_is_all_items_relevant(conn)
     def make(name: str, all_relevant: bool):
         calls = {"n": 0}
 
-        def fetch():
+        def fetch(**kwargs):
             calls["n"] += 1
             old = [_item(f"https://x.test/{name}-old.html", "Old baseline doc")]
             if calls["n"] == 1:
@@ -152,7 +159,7 @@ def test_unreadable_new_pdf_is_alerted_not_dropped(conn):
     url = "https://x.test/broken.pdf"
     calls = {"n": 0}
 
-    def fetch():
+    def fetch(**kwargs):
         calls["n"] += 1
         items = [] if calls["n"] == 1 else [_item(url, "A notice with no keywords in its title")]
         return {"items": items, "bucket_counts": {"src1": len(items)}}
@@ -186,7 +193,7 @@ def test_canary_flags_zero_items_and_a_big_drop(conn):
     )
     conn.commit()
 
-    def fetch():
+    def fetch(**kwargs):
         # bucketA: dropped to 0. bucketB: dropped to 3, which is < 50% of 8.
         return {"items": [], "bucket_counts": {"bucketA": 0, "bucketB": 3}}
 
@@ -204,7 +211,7 @@ def test_canary_does_not_flag_a_fresh_or_previously_empty_bucket(conn):
     not be flagged — the 1st of a new month is legitimately thin/empty, and
     flagging it every month would be a false alarm, not a real problem."""
 
-    def fetch():
+    def fetch(**kwargs):
         return {"items": [], "bucket_counts": {"brand-new-bucket": 0}}
 
     src = _source("src1", fetch)
@@ -220,7 +227,7 @@ def test_canary_does_not_flag_a_fresh_or_previously_empty_bucket(conn):
 # --------------------------------------------------------------------------
 
 def test_one_source_exception_does_not_stop_the_others(conn):
-    def bad_fetch():
+    def bad_fetch(**kwargs):
         raise RuntimeError("simulated source failure")
 
     bad = _source("bad-source", bad_fetch)
@@ -242,7 +249,7 @@ def test_failed_send_leaves_alerted_zero_and_is_retried_next_run(conn):
     url = "https://x.test/new.html"
     calls = {"n": 0}
 
-    def fetch():
+    def fetch(**kwargs):
         calls["n"] += 1
         items = [] if calls["n"] == 1 else [_item(url, "DPDP related notice")]
         return {"items": items, "bucket_counts": {"src1": len(items)}}
